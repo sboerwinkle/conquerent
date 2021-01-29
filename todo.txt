@@ -1,0 +1,16 @@
+- Hashing
+/ Internal sockets / remove 'nc' dependency
+	/ Better output window situation
+- improved pathing
+	- Pick direction more intelligently when there's bias to be had
+	- When blocked, use listeners to resume when there's a path
+		Including when multiple clear at once I suppose
+- Attack
+	- Death "animation"
+	Attack should have a slight wind-up so there's an advantage to holding a space
+	- Listeners to neighboring spaces
+- Syncing / "host" flag
+- Proper command queueing / replacement (shift)
+- Split into modules
+- Better command indication - shade all target cells, circle selected target cell
+- Put on Git
