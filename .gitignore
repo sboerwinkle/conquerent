@@ -1,2 +1,3 @@
 output_script
 *.swp
+__pycache__

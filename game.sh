@@ -27,12 +27,8 @@ if ! [ -x output_script ]; then
 	exit
 fi
 
-if [ $# -eq 3 ]; then
-	rm -f stdout_fifo
-	mkfifo stdout_fifo
-	./output_script &
-	./conquerent.py "$@" >stdout_fifo
-	rm -f stdout_fifo
-else
-	echo $'Usage:\n'"$0 name host port"
-fi;
+rm -f stdout_fifo
+mkfifo stdout_fifo
+./output_script &
+./conquerent.py "$@" >stdout_fifo
+rm -f stdout_fifo

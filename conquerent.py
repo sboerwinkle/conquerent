@@ -11,77 +11,30 @@ SCREEN_HEIGHT=500
 TILE_WIDTH=50
 TILE_HEIGHT=43
 
-DELAY_FACTOR = 3.0
+DELAY_FACTOR=3.0
 
+import gzip
 import io
 import os
 import pygame as pg
+import shutil
 from select import select as fd_select
 import socket
 import sys
 import traceback
 
-if not pg.image.get_extended():
-    raise SystemExit("Extended image module req'd, aborting")
-
-"""images"""
-"""
-You can't convert() / convert_alpha() until the display is set up,
-but that doesn't happen until we're ready to start the game.
-So, we just store references to objects here, and assign them an "image" attribute when it's time to do the image loading.
-Because of how Python works, this also works to create class-level "image" attributes after the fact if desired.
-"""
-images_to_load=[]
-teamed_colors=[(255, 0, 0, 255), (0xFF, 0x8f, 0x26, 255), (0x03, 0xC2, 0xFC, 255), (128, 128, 128, 255), (0x84, 0x03, 0xFC, 255), (0xFA, 0xAA, 0xF3, 255)]
-class ImageSpec:
-    pass
-def queue_imgs(item, segments, mode):
-    x = ImageSpec()
-    x.item = item
-    x.mode = mode
-    x.path = os.path.join("assets", *segments)
-    images_to_load.append(x)
-def load_img(item, *segments):
-    queue_imgs(item, segments, 'normal')
-def load_spun_imgs(item, *segments):
-    queue_imgs(item, segments, 'spun')
-def load_teamed_imgs(item, *segments):
-    queue_imgs(item, segments, 'teamed')
-def load_queued_imgs():
-    global images_to_load
-    for spec in images_to_load:
-        img = pg.image.load(spec.path).convert_alpha()
-        item = spec.item
-        if spec.mode == 'normal':
-            item.image = img
-        elif spec.mode == 'spun':
-            item.spun_images = [img] + [rotate(img, deg) for deg in [60, 120, 180, -120, -60]]
-        elif spec.mode == 'teamed':
-            item.teamed_images = [dye(img, c) for c in teamed_colors]
-    images_to_load = []
-def rotate(img, degrees):
-    "A wrapper around pygame's rotate that rotates about the center and keeps the dimensions the same"
-    dest = pg.Surface(img.get_size(), pg.SRCALPHA, img)
-    dest.fill(0)
-    rotated = pg.transform.rotate(img, degrees)
-    (dx, dy) = dest.get_rect().center
-    (rx, ry) = rotated.get_rect().center
-    dest.blit(rotated, (dx-rx, dy-ry))
-    return dest
-def dye(img, color):
-    copy = img.copy()
-    copy.fill(color, special_flags=pg.BLEND_RGBA_MULT)
-    return copy
-"""end images"""
+#Local imports
+import tasks, images
+from myhash import myhash
 
 """vectors"""
-unit_vecs=[[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]]
+unit_vecs=[(1,0),(1,-1),(0,-1),(-1,0),(-1,1),(0,1)]
 def vec_add(v1, v2):
-    return [v1[0]+v2[0], v1[1]+v2[1]]
+    return (v1[0]+v2[0], v1[1]+v2[1])
 def vec_mult(v1, c):
-    return [v1[0]*c, v1[1]*c]
+    return (v1[0]*c, v1[1]*c)
 def calc_angle(v1, flip):
-    [x,y] = v1
+    (x,y) = v1
     def gr(a, b):
         if flip:
             return a >= b
@@ -105,134 +58,6 @@ def calc_angle(v1, flip):
             return 4 if gr(y*2, x) else 3
 
 """end vectors"""
-
-"""tasks"""
-class Task:
-    def __init__(self):
-        self.listeners = []
-        self.cancel_listeners = []
-    def then(self, listener):
-        self.listeners.append(listener)
-    def oncancel(self, listener):
-        self.cancel_listeners.append(listener)
-    def _run(self):
-        result = self.run()
-        if isinstance(result, Task):
-            "We can return a task to indicate a continuation, in that the original task's work isn't finished"
-            "Combine the listener lists, and then point them to the same reference"
-            self.listeners.extend(result.listeners)
-            result.listeners = self.listeners
-            self.cancel_listeners.extend(result.cancel_listeners)
-            result.cancel_listeners = self.cancel_listeners
-            return
-
-        if result == None:
-            to_run = self.listeners
-        elif result == False:
-            to_run = self.cancel_listeners
-        else:
-            raise Exception('Weird result from task', result)
-        for l in to_run:
-            l()
-    def cancel(self):
-        pending_tasks.remove(self)
-        for l in self.cancel_listeners:
-            l()
-class KeepaliveTask(Task):
-    """A dumb task that just makes sure the "minimum time to next task" is always well-defined, because it's always in the queue"""
-    def __init__(self):
-        super().__init__()
-        self.time = 1000000
-        pending_tasks.append(self)
-    def run(self):
-        KeepaliveTask()
-class MoveTask(Task):
-    def __init__(self, ent, pos):
-        super().__init__()
-        self.ent = ent
-        self.pos = pos
-    def run(self):
-        """...eprint("Removing token")"""
-        self.ent.move(self.pos)
-class ChargeMoveTask(Task):
-    def __init__(self, ent, time):
-        super().__init__()
-        self.time = time
-        pending_tasks.append(self)
-        self.ent = ent
-    def run(self):
-        """...eprint("Charged!")"""
-        self.ent.move_charged = True
-class TokenResolverTask(Task):
-    def __init__(self, actor, token):
-        super().__init__()
-        immediately(0, self)
-        self.actor = actor
-        self.token = token
-    def run(self):
-        actor = self.actor
-        token = self.token
-        token.obstructs = True
-        immediately(ACT_PATIENCE, MoveTask(token, None))
-        if token.valid:
-            """...eprint("Move accepted")"""
-            task = MoveTask(actor, token.pos)
-            immediately(ACT_PATIENCE, task)
-            return task
-        else:
-            """...eprint("Couldn't move, conflicted")"""
-            return False
-class LambdaTask(Task):
-    def __init__(self, l, time = None):
-        super().__init__()
-        if time != None:
-            self.time = time
-            pending_tasks.append(self)
-        self.l = l
-    def run(self):
-        self.l()
-
-pending_tasks=[]
-immediate_tasks=[[]]
-THINK_PATIENCE=1
-ACT_PATIENCE=2
-def immediately(patience, task):
-    "add the task to the (patience)th immediate list."
-    "If there aren't that many immediate lists yet, pad with empty lists."
-    while len(immediate_tasks) <= patience:
-        immediate_tasks.append([])
-    immediate_tasks[patience].append(task)
-def next_task_time():
-    return min([t.time for t in pending_tasks])
-def run_tasks(time):
-    global pending_tasks
-    """...eprint("----------")"""
-    to_run = immediate_tasks[0]
-    others = []
-    for t in pending_tasks:
-        if t.time == time:
-            to_run.append(t)
-        elif t.time > time:
-            t.time -= time
-            others.append(t)
-        else:
-            raise "Wrong time!"
-    pending_tasks = others
-    more_left = True
-    while more_left:
-        to_run = immediate_tasks[0]
-        while to_run:
-            t = to_run.pop(0)
-            t._run()
-        more_left = False
-        for i in range(1, len(immediate_tasks)):
-            if immediate_tasks[i]:
-                """...eprint("-" * i)"""
-                immediate_tasks[0] = immediate_tasks[i]
-                immediate_tasks[i] = []
-                more_left = True
-                break
-"""end tasks"""
 
 """entities"""
 class Entity:
@@ -259,6 +84,9 @@ class Entity:
             board[pos[0]][pos[1]].append(self)
             self.draw(pos)
 
+    def customhash(self):
+        return (self.__class__.__name__, self.pos)
+
 class MoveClaimToken(Entity):
     valid = True
     def __init__(self, pos):
@@ -283,10 +111,12 @@ class SpunEntity(Entity):
         super().__init__(pos)
     def draw(self, pos):
         self._draw(pos, self.spun_images[self.angle])
+    def customhash(self):
+        return (angle, super().customhash())
 
 class MovingIcon(SpunEntity):
     pass
-load_spun_imgs(MovingIcon, "icons", "move.png")
+images.queue_spun(MovingIcon, "icons", "move.png")
 
 class Actor(Entity):
     obstructs = True
@@ -311,35 +141,42 @@ class Actor(Entity):
         task.then(self.handle_finish)
         task.oncancel(self.handle_finish)
     def charge_move(self):
-        self.has_task(ChargeMoveTask(self, self.lap_time))
+        self.has_task(tasks.ChargeMove(self, self.lap_time))
 
     def should_move(self, angle):
         dest = vec_add(self.pos, unit_vecs[angle])
         if not is_walkable(get_tile(dest)):
             return False
-        if isinstance(self.task, ChargeMoveTask):
+        if isinstance(self.task, tasks.ChargeMove):
             return
         if self.task != None:
             self.task.cancel()
         if not self.move_charged:
             self.charge_move()
             return
-        self.has_task(TokenResolverTask(self, MoveClaimToken(dest)))
+        self.has_task(tasks.TokenResolver(self, MoveClaimToken(dest)))
     def should_chill(self):
         if self.task == None and not self.move_charged:
             self.charge_move()
+
+    def customhash(self):
+        if self.ai == None:
+            return super().customhash()
+        return (super().customhash(), self.ai.customhash())
 
 class TeamedActor(Actor):
     def __init__(self, pos, team):
         self.image = self.teamed_images[team]
         self.team = team
         super().__init__(pos)
+    def customhash(self):
+        return (self.team, super().customhash())
 
 class Guy(TeamedActor):
     def __init__(self, pos, team):
         super().__init__(pos, team)
         self.lap_time=360
-load_teamed_imgs(Guy, "units", "guy2.png")
+images.queue_teamed(Guy, "units", "guy2.png")
 """end entities"""
 
 """symbols"""
@@ -353,12 +190,13 @@ class Symbol:
         screen.blit(self.image, tile_to_screen(self.pos))
     def clear(self):
         draw_tile(self.pos)
+    # Symbols are NOT hashed, they're part of local user HUD
 class SelectSymbol(Symbol):
     pass
-load_img(SelectSymbol, "icons", "select.png")
+images.queue(SelectSymbol, "icons", "select.png")
 class TargetSymbol(Symbol):
     pass
-load_img(TargetSymbol, "icons", "target.png")
+images.queue(TargetSymbol, "icons", "target.png")
 def clear_symbols():
     global symbols
     for s in symbols:
@@ -369,7 +207,7 @@ def clear_symbols():
 """tiles"""
 """Tiles don't do anything, so I don't need to ever instantiate more than one of each type"""
 tile_grass = Entity()
-load_img(tile_grass, "tiles", "grass.png")
+images.queue(tile_grass, "tiles", "grass.png")
 
 """end tiles"""
 
@@ -387,7 +225,7 @@ screen_offset_y = 0
 board = [[[tile_grass] if code!=0 else [] for code in row] for row in BOARD]
 
 def get_tile(pos):
-    [x, y] = pos
+    (x, y) = pos
     if x < 0 or x >= len(board):
         return []
     row = board[x]
@@ -405,22 +243,22 @@ def is_walkable(ents):
 
 """rendering"""
 def tile_to_screen(pos):
-    [x, y] = pos
+    (x, y) = pos
     return ((screen_offset_x + TILE_WIDTH*x + int(TILE_WIDTH/2)*y), (screen_offset_y + TILE_HEIGHT*y))
 
 def draw_tile(pos):
-    [x,y]=pos
+    (x,y)=pos
     for entity in board[x][y]:
         entity.draw(pos)
 
 def draw_all_tiles():
     for x in range(0, len(board)):
         for y in range(0, len(board[x])):
-            draw_tile([x, y])
+            draw_tile((x, y))
 """end rendering"""
 
 """ai"""
-class Ai(Task):
+class Ai(tasks.Task):
     def __init__(self, ent):
         super().__init__()
         self.ent = ent
@@ -434,7 +272,7 @@ class Ai(Task):
         if self.is_queued:
             return
         self.is_queued = True
-        immediately(THINK_PATIENCE, self)
+        tasks.immediately(tasks.THINK_PATIENCE, self)
     def draw_symbols(self):
         pass
 class WallAi(Ai):
@@ -452,13 +290,21 @@ class WallAi(Ai):
 class Command:
     def __init__(self, mode):
         self.mode = mode
+    def customhash(self):
+        return self.mode
+class GotoCommand(Command):
+    def __init__(self, pos):
+        super().__init__('goto')
+        self.pos = pos
+    def customhash(self):
+        return (self.pos, super().customhash())
 class ControlledAi(Ai):
     def __init__(self, ent):
         super().__init__(ent)
         self.todo = []
     def todo_now(self, command):
         self.todo = [command]
-        LambdaTask(self.queue_immediately, 0)
+        tasks.Lambda(self.queue_immediately, 0)
     def todo_next(self, command):
         if self.todo:
             self.todo.append(command)
@@ -468,9 +314,7 @@ class ControlledAi(Ai):
         tile = get_tile(pos)
         if not tile:
             return None
-        ret = Command('goto')
-        ret.pos = pos
-        return ret
+        return GotoCommand(pos)
     def run(self):
         "Each time this loop restarts we assume the previous command 'completed'"
         "So we have to throw in a fake command for the first iteration"
@@ -483,7 +327,7 @@ class ControlledAi(Ai):
             command = self.todo[0]
             if command.mode == "goto":
                 delta = vec_add(command.pos, vec_mult(self.ent.pos, -1))
-                if delta == [0, 0]:
+                if delta == (0, 0):
                     continue
                 flip = self.ent.flip
                 angle = calc_angle(delta, flip)
@@ -497,6 +341,8 @@ class ControlledAi(Ai):
         for command in self.todo:
             if command.mode == "goto":
                 TargetSymbol(command.pos)
+    def customhash(self):
+        return (self.todo, super().customhash())
 """end ai"""
 
 """control"""
@@ -508,7 +354,7 @@ def mouse_to_tile(x, y):
     col = y // TILE_HEIGHT
     x -= int(TILE_WIDTH/2)*col
     row = x // TILE_WIDTH
-    return [row, col]
+    return (row, col)
 
 def get_selectable(pos, team):
     contents = get_tile(pos)
@@ -530,12 +376,42 @@ class Seat:
         self.name = name
         self.time = -1
         self.team = team
+seats=[]
+def get_team():
+    for s in seats:
+        if s.name == localname:
+            return s.team
+    return []
 """end seats"""
 
-""" 'main' stuff """
+"""main stuff"""
+
+fast_forward = False
+host_mode = False
+log_filename = "saves/log.%d.gz" % os.getpid()
+
+def fast_forward_from_log(src_filename):
+    try:
+        shutil.copyfile(src_filename, log_filename)
+    except:
+        traceback.print_exc()
+        eprint("Issue while trying to load from save '%s'" % src_filename)
+        return
+    f = gzip.open(log_filename)
+    out("Restoring state from %s..." % src_filename)
+    global fast_forward
+    fast_forward=True
+    try:
+        for line in f:
+            handle_net_line(line.decode('utf-8'))
+    finally:
+        fast_forward=False
+        f.close()
+    out("State restored.")
 
 def delay(time):
-    pg.time.wait(int(time * DELAY_FACTOR))
+    if not fast_forward:
+        pg.time.wait(int(time * DELAY_FACTOR))
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -545,16 +421,16 @@ def out(x):
     sys.stdout.flush()
 
 def do_step(requested_time):
-    next_time = next_task_time()
+    next_time = tasks.next_time()
     while next_time <= requested_time:
         requested_time -= next_time
         delay(next_time)
-        run_tasks(next_time)
+        tasks.run(next_time)
         pg.display.update()
-        next_time = next_task_time()
+        next_time = tasks.next_time()
     delay(requested_time)
     "Won't run anything, but moves times up"
-    run_tasks(requested_time)
+    tasks.run(requested_time)
 
 selected = None
 def select(target):
@@ -569,19 +445,38 @@ def select(target):
             target.ai.draw_symbols()
     pg.display.update()
 
-def handle_net_command(seats, who, command, line):
+def handle_net_line(line):
+    "Parse out the command: '[who]:[command] [line]'"
+    delim = line.index(":")
+    who = line[0:delim]
+    "Strip off newline here while we're also stripping the colon"
+    line = line[delim+1:-1]
+    if not (' ' in line):
+        line = line + ' '
+    delim = line.index(' ')
+    command = line[0:delim]
+    line = line[delim+1:]
+    return handle_net_command(who, command, line)
+
+def handle_net_command(who, command, line):
+    " Returns False if the command had no impact on gamestate "
     args = line.split(' ')
     # Some commands don't require you to be seated
     if command == "say":
         out(who + ":  " + line)
-        return
+        return False
     if command == "raw":
         out(line)
-        return
+        return False
     if command == "seats":
         seats[:] = [Seat(args[i], [i]) for i in range(len(args))]
-        out("> %s set the seats to %s" % (who, str([s.name for s in seats])))
+        out("> %s set the /seats to: %s" % (who, " ".join([s.name for s in seats])))
         return
+    if command == "callhash":
+        out("> %s issued /callhash" % who)
+        send("raw #%X for %s\n" % (myhash((board, tasks._pending)), localname))
+        #send("raw #%X for %s\n" % (myhash(tasks._pending), localname))
+        return False
     if command == "mk":
         what = args[0]
         if what == 'guy':
@@ -591,7 +486,7 @@ def handle_net_command(seats, who, command, line):
         else:
             eprint("Don't know how to make a '%s'" % what)
             return
-        pos = [int(args[1]), int(args[2])]
+        pos = (int(args[1]), int(args[2]))
         if len(args) == 4:
             f(pos, int(args[3]))
         else:
@@ -624,8 +519,8 @@ def handle_net_command(seats, who, command, line):
         return
     if command == "do":
         args = [int(a) for a in args]
-        src = args[0:2]
-        dest = args[2:4]
+        src = (args[0], args[1])
+        dest = (args[2], args[3])
         subject = get_selectable(src, seat.team)
         if subject == None:
             eprint("Couldn't find a selectable thing at %s" % str(src))
@@ -647,40 +542,54 @@ def spawn_units():
             if cell <= 1:
                 continue
             team = cell - 2
-            ControlledAi(Guy([x,y], team))
+            ControlledAi(Guy((x,y), team))
+
+def send(msg):
+    server.send((localname + ":" + msg).encode('utf-8'))
 
 def main():
-    if len(sys.argv) != 4:
-        eprint("Usage: %s name host port" % sys.argv[0])
+    global server
+    global localname
+    if (len(sys.argv) | 1) != 5: # hahahahahah
+        eprint("Usage: %s name host port [save.gz]" % sys.argv[0])
         return
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.connect((sys.argv[2], int(sys.argv[3])))
-    server_reader = server.makefile() # Convenience so we don't have to mess with recv buffers
+
+    server_reader = server.makefile(mode='b', buffering=0) # Convenience so we don't have to mess with recv buffers
+    # TODO: https://code.activestate.com/recipes/578900-non-blocking-readlines/
+    # If that link dies, basically the gist of it is managing a buffer by hand;
+    #   they use fcntl for non-blocking reads, but we could use our existing select() just fine.
+    #   The reason this is necessary is b/c if I enable buffering on server_reader as-is,
+    #   each time I fetch a line from it, it may fetch multiple from the underlying socket
+    #   (which then reports as not ready for read),
+    #   and I have no way of knowing how many lines I can read at that time.
+
     localname = sys.argv[1]
-    seats = []
-    def send(msg):
-        server.send((localname + ":" + msg).encode('utf-8'))
-    def get_team():
-        for s in seats:
-            if s.name == localname:
-                return s.team
-        return []
     global screen
     pg.init()
     screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    load_queued_imgs()
+    images.load_queued()
+
     draw_all_tiles()
     pg.display.update()
-    KeepaliveTask()
+    tasks.Keepalive()
 
     # Board setup stuff. Some things expect to happen in the framework of task evaluation,
-    # e.g. immediately() calls work as expected,
+    # e.g. tasks.immediately() calls work as expected,
     # so we throw the initial setup into the 0th "turn"
-    LambdaTask(spawn_units, 0)
+    tasks.Lambda(spawn_units, 0)
     do_step(0)
 
-    #LambdaTask(lambda: ControlledAi(Guy([2,2])), 360)
-    #LambdaTask(lambda: WallAi(Guy([2,2])), 360*5)
+    # TODO if logfile has existing contents, replay those first
+    if len(sys.argv) > 4:
+        fast_forward_from_log(sys.argv[4])
+        logfile = gzip.open(log_filename, "ab") # 'A'ppend 'B'inary mode
+    else:
+        logfile = gzip.open(log_filename, "wb")
+
+    #tasks.Lambda(lambda: ControlledAi(Guy((2,2))), 360)
+    #tasks.Lambda(lambda: WallAi(Guy((2,2))), 360*5)
     # Setup input. This probably only works on Linux
     out("Initializing inputs")
     console_reader = io.open(sys.stdin.fileno())
@@ -697,25 +606,21 @@ def main():
                 break
             if server in to_read:
                 # Note, here we're assuming there's a line available for reading, but we're only promised that there's *some* data
-                orig = server_reader.readline()
-                if not orig:
+                orig_bytes = server_reader.readline()
+                if not orig_bytes:
                     raise Exception("Server socket closed")
 
                 try:
-                    "Parse out the command: '[who]:[command] [line]'"
-                    delim = orig.index(":")
-                    who = orig[0:delim]
-                    "Strip off newline here while we're also stripping the colon"
-                    line = orig[delim+1:-1]
-                    if not (' ' in line):
-                        line = line + ' '
-                    delim = line.index(' ')
-                    command = line[0:delim]
-                    line = line[delim+1:]
-                    handle_net_command(seats, who, command, line)
+                    line = orig_bytes.decode('utf-8')
+                    result = handle_net_line(line)
+                    if result != False:
+                        logfile.write(orig_bytes)
                 except Exception as err:
-                    print("Error while processing line: " + orig)
                     traceback.print_exc()
+                    try:
+                        print("Error while processing line: " + orig)
+                    except:
+                        print("Error while processing line which couldn't be displayed")
                     sys.stdout.flush()
             if sys.stdin in to_read:
                 line = console_reader.readline()
@@ -739,6 +644,10 @@ def main():
             elif event.type == pg.KEYDOWN:
                 if event.key == pg.K_SPACE:
                     send("T " + str(360*3) + "\n")
+    send("raw > %s has left\n" % localname)
+    logfile.close()
+    server.close()
+    os.rename(log_filename, "saves/most_recent.gz")
 
 if __name__ == "__main__":
     main()
