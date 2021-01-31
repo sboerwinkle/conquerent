@@ -5,13 +5,14 @@ The game itself!
 Much credit goes to the pygame maintainers for their wondeful, many-exampled library.
 """
 
+#Change this stuff as you desire
 SCREEN_WIDTH=500
 SCREEN_HEIGHT=500
+DELAY_FACTOR=3.0
 
+#Probably should not change this stuff
 TILE_WIDTH=50
 TILE_HEIGHT=43
-
-DELAY_FACTOR=3.0
 
 import gzip
 import io
@@ -285,7 +286,7 @@ class WallAi(Ai):
             if self.ent.should_move(new_angle) != False:
                 self.angle = new_angle
                 return
-        eprint("Couldn't find anywhere to go, shutting down")
+        #eprint("Couldn't find anywhere to go, shutting down")
         self.ent.should_chill()
 class Command:
     def __init__(self, mode):
@@ -390,24 +391,44 @@ fast_forward = False
 host_mode = False
 log_filename = "saves/log.%d.gz" % os.getpid()
 
+uploading = False
+downloading = False
+net_input_paused = False
+net_pause_queue = []
+def pause_net_input():
+    global net_input_paused
+    net_input_paused = True
+def resume_net_input():
+    global net_input_paused
+    global net_pause_queue
+    net_input_paused = False
+    # We aren't setting fast_forward, since this should be things that other people "recently" played thru.
+    # We could, though, wouldn't be a huge deal
+    for line in net_pause_queue:
+        handle_net_bytes(line)
+    net_pause_queue = []
+    if net_input_paused:
+        out("\n\n\nLooks like there were two /sync's going on at the same time.\nThis probably means multiple hosts, which is bad,\nbut in either case something's probably corrupt for someone now.\n\n\n")
+
 def fast_forward_from_log(src_filename):
     try:
         shutil.copyfile(src_filename, log_filename)
     except:
         traceback.print_exc()
         eprint("Issue while trying to load from save '%s'" % src_filename)
-        return
+        return False
     f = gzip.open(log_filename)
     out("Restoring state from %s..." % src_filename)
     global fast_forward
     fast_forward=True
     try:
         for line in f:
-            handle_net_line(line.decode('utf-8'))
+            handle_net_bytes(line, False)
     finally:
         fast_forward=False
         f.close()
     out("State restored.")
+    return True
 
 def delay(time):
     if not fast_forward:
@@ -445,7 +466,17 @@ def select(target):
             target.ai.draw_symbols()
     pg.display.update()
 
-def handle_net_line(line):
+def handle_net_bytes(orig_bytes, do_log = True):
+    if orig_bytes[0:1] == b'#':
+        if not downloading:
+            return
+        orig_bytes = orig_bytes[1:]
+    else:
+        if net_input_paused:
+            net_pause_queue.append(orig_bytes)
+            return
+
+    line = orig_bytes.decode('utf-8')
     "Parse out the command: '[who]:[command] [line]'"
     delim = line.index(":")
     who = line[0:delim]
@@ -456,9 +487,14 @@ def handle_net_line(line):
     delim = line.index(' ')
     command = line[0:delim]
     line = line[delim+1:]
-    return handle_net_command(who, command, line)
+    result = handle_net_command(who, command, line)
+    if result != False and do_log:
+        logfile.write(orig_bytes)
 
 def handle_net_command(who, command, line):
+    global downloading
+    global fast_forward
+    global host_mode
     " Returns False if the command had no impact on gamestate "
     args = line.split(' ')
     # Some commands don't require you to be seated
@@ -470,7 +506,7 @@ def handle_net_command(who, command, line):
         return False
     if command == "seats":
         seats[:] = [Seat(args[i], [i]) for i in range(len(args))]
-        out("> %s set the /seats to: %s" % (who, " ".join([s.name for s in seats])))
+        out("> %s set the /seats to: %s" % (who, line))
         return
     if command == "callhash":
         out("> %s issued /callhash" % who)
@@ -484,7 +520,7 @@ def handle_net_command(who, command, line):
         elif what == 'move':
             f = MovingIcon
         else:
-            eprint("Don't know how to make a '%s'" % what)
+            out("Don't know how to make a '%s'" % what)
             return
         pos = (int(args[1]), int(args[2]))
         if len(args) == 4:
@@ -493,12 +529,42 @@ def handle_net_command(who, command, line):
             f(pos)
         pg.display.update()
         return
+    if command == "join":
+        out("> %s has joined" % who)
+        if host_mode:
+            send("sync %s\n" % who)
+        return False
+    if command == "host":
+        out("> %s is now the /host" % who)
+        host_mode = (who == localname)
+        return False
+    if command == "sync":
+        out("> %s started /sync-ing to: %s" % (who, line))
+        if who == localname:
+            global uploading
+            uploading = True
+            pause_net_input()
+            global logfile
+            logfile.close()
+            logfile = gzip.open(log_filename)
+        elif localname in args:
+            downloading = True
+            fast_forward = True
+            pause_net_input()
+        return False
+    if command == "syncdone":
+        if downloading: # Which you always should be in this case
+            out("---------- SYNC COMPLETE ----------")
+        downloading = False
+        fast_forward = False
+        resume_net_input()
+        return False
 
     for seat in seats:
         if seat.name == who:
             break
     else:
-        eprint("Couldn't find seat for input %s:%s %s" % (who, command, line))
+        out("Couldn't find seat for input %s:%s %s" % (who, command, line))
         return
 
     if command == "T":
@@ -523,7 +589,7 @@ def handle_net_command(who, command, line):
         dest = (args[2], args[3])
         subject = get_selectable(src, seat.team)
         if subject == None:
-            eprint("Couldn't find a selectable thing at %s" % str(src))
+            out("Couldn't find a selectable thing at %s" % str(src))
         else:
             send_tile_command(subject, dest)
             if subject.pos == selected:
@@ -533,6 +599,8 @@ def handle_net_command(who, command, line):
         seat.team = [int(arg) for arg in args]
         out("> %s set their team to %s" % (who, str(seat.team)))
         return
+    out("> %s issued unknown command %s" % (who, command))
+    return False
 
 def spawn_units():
     for x in range(len(BOARD)):
@@ -548,8 +616,12 @@ def send(msg):
     server.send((localname + ":" + msg).encode('utf-8'))
 
 def main():
+    # Jesus take the wheel, I need some objects or something up in here
     global server
     global localname
+    global uploading
+    global logfile
+
     if (len(sys.argv) | 1) != 5: # hahahahahah
         eprint("Usage: %s name host port [save.gz]" % sys.argv[0])
         return
@@ -581,11 +653,11 @@ def main():
     tasks.Lambda(spawn_units, 0)
     do_step(0)
 
-    # TODO if logfile has existing contents, replay those first
     if len(sys.argv) > 4:
-        fast_forward_from_log(sys.argv[4])
+        host_hint = fast_forward_from_log(sys.argv[4])
         logfile = gzip.open(log_filename, "ab") # 'A'ppend 'B'inary mode
     else:
+        host_hint = False
         logfile = gzip.open(log_filename, "wb")
 
     #tasks.Lambda(lambda: ControlledAi(Guy((2,2))), 360)
@@ -593,13 +665,31 @@ def main():
     # Setup input. This probably only works on Linux
     out("Initializing inputs")
     console_reader = io.open(sys.stdin.fileno())
-    running = True
     select(None)
+    send('host\n' if host_hint else 'join\n')
     out("Starting main loop")
+
+    running = True
     while running:
-        " Rather than spin up two threads (ugh) we just poll both event sources at 20 Hz "
+        # Rather than spin up two threads (ugh) we just poll both event sources at 20 Hz
         pg.time.wait(50)
-        " Read and process any lines waiting on the text inputs "
+
+        # If we're uploading, we write those lines out at 20Hz.
+        # Yes, the whole "20Hz main loop" thing is dumb. You fix it then.
+        if uploading:
+            #pg.time.wait(200) # Testing only, should be commented
+            line = logfile.readline()
+            if line:
+                server.send(b'#' + line)
+            else:
+                server.send(b'#:syncdone\n')
+                send('callhash\n')
+                uploading = False
+                logfile.close()
+                logfile = gzip.open(log_filename, 'ab')
+                resume_net_input()
+
+        # Read and process any lines waiting on the text inputs
         while True:
             to_read,_,_ = fd_select([server, sys.stdin], [], [], 0)
             if not to_read:
@@ -611,20 +701,19 @@ def main():
                     raise Exception("Server socket closed")
 
                 try:
-                    line = orig_bytes.decode('utf-8')
-                    result = handle_net_line(line)
-                    if result != False:
-                        logfile.write(orig_bytes)
+                    result = handle_net_bytes(orig_bytes)
                 except Exception as err:
                     traceback.print_exc()
                     try:
-                        print("Error while processing line: " + orig)
+                        print("Error while processing line: " + str(orig_bytes))
                     except:
                         print("Error while processing line which couldn't be displayed")
                     sys.stdout.flush()
             if sys.stdin in to_read:
                 line = console_reader.readline()
-                if (line[0] == "/"):
+                if not line:
+                    running = False
+                elif (line[0] == "/"):
                     send(line[1:])
                 else:
                     send("say " + line)
