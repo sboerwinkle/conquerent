@@ -362,13 +362,14 @@ def get_selectable(pos, team):
     for x in get_tile(pos):
         if isinstance(x, TeamedActor) and x.team in team:
             return x
-def send_tile_command(ent, pos):
+def send_tile_command(ent, pos, append):
     ai = ent.ai
     " TODO Add team check "
     if isinstance(ai, ControlledAi):
         command = ai.mk_tile_command(pos)
         if command != None:
-            ai.todo_next(command)
+            m = ai.todo_next if append else ai.todo_now
+            m(command)
 """end control"""
 
 """seats"""
@@ -591,7 +592,7 @@ def handle_net_command(who, command, line):
         if subject == None:
             out("Couldn't find a selectable thing at %s" % str(src))
         else:
-            send_tile_command(subject, dest)
+            send_tile_command(subject, dest, len(args) == 5)
             if subject.pos == selected:
                 select(subject)
         return
@@ -727,7 +728,8 @@ def main():
                     select(get_selectable(tile, get_team()))
                 elif event.button == 3:
                     if selected != None:
-                        send("do %d %d %d %d\n" % (selected[0], selected[1], tile[0], tile[1]))
+                        modifier = " 1" if pg.KMOD_SHIFT & pg.key.get_mods() else ""
+                        send("do %d %d %d %d%s\n" % (selected[0], selected[1], tile[0], tile[1], modifier))
                 elif event.button == 2:
                     out("(" + str(tile) + ")")
             elif event.type == pg.KEYDOWN:

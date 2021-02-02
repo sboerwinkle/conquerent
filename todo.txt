@@ -5,10 +5,11 @@ Done
 	/ Better output window situation
 / Change coordinates to tuples
 / Split into modules
+/ Proper command queueing / replacement (shift)
+/ Syncing / "host" flag
 
 Important
 =========
-- Syncing / "host" flag
 - improved pathing
 	- Pick direction more intelligently when there's bias to be had
 	- When blocked, use listeners to resume when there's a path
@@ -17,7 +18,10 @@ Important
 	- Death "animation"
 	Attack should have a slight wind-up so there's an advantage to holding a space
 	- Listeners to neighboring spaces
-- Proper command queueing / replacement (shift)
+		- "die()" method on AI (called by die() on entity/actor) cleans up all active cell listeners
+		- Mechanics on the listeners themselves are quite simple - invoke with coords when contents trigger, end of story
+			And also they trigger when placed?
+			And they don't do anything other than decide if they should queue the AI??????
 - Better command indication - shade all target cells, circle selected target cell
 - Put on Git
 
