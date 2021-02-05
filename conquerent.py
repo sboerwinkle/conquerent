@@ -34,29 +34,44 @@ def vec_add(v1, v2):
     return (v1[0]+v2[0], v1[1]+v2[1])
 def vec_mult(v1, c):
     return (v1[0]*c, v1[1]*c)
-def calc_angle(v1, flip):
-    (x,y) = v1
-    def gr(a, b):
-        if flip:
+
+# This function lovingly constructed on graph paper!
+# Returns a list of angles to try to reach that vector, in preference order.
+# Only returns angles that will reduce the "true" (euclidean) distance to the target.
+def calc_angles(v1, flip):
+    if v1 == (0,0):
+        return []
+    (x,y)=v1
+    def gr(a,b):
+        if flip == 1:
             return a >= b
         else:
             return a > b
-    if x > 0:
-        if y > 0:
-            return 0 if gr(x, y) else 5
-        y = -y
-        if y > x:
-            return 2 if gr(y, x*2) else 1
+    # e() handles when x >= y >= 0
+    def e(x,y):
+        if x == y:
+            return [0,5]
+        if x == 1 and y == 0:
+            return [0]
+        return [0,5,1]
+    # f() handles when x>=0 and y>=0
+    # This one is allowed to introduce a flip since e() doesn't care abt the value of flip
+    def f(x,y):
+        if gr(y,x):
+            return [5-a for a in e(y,x)]
+        return e(x,y)
+    # g() handles when y >= 0
+    def g(x,y):
+        if gr(0,x):
+            if gr(-x,y):
+                return [(a+4)%6 for a in f(y,-x-y)]
+            else:
+                return [(a+5)%6 for a in f(y+x,-x)]
         else:
-            return 1 if gr(y*2, x) else 0
-    else:
-        if y < 0:
-            return 3 if gr(y, x) else 2
-        x = -x
-        if y > x:
-            return 5 if gr(y, x*2) else 4
-        else:
-            return 4 if gr(y*2, x) else 3
+            return f(x,y)
+    if y > 0 or (y == 0 and x*flip > 0):
+        return g(x,y)
+    return [(a+3)%6 for a in g(-x,-y)]
 
 """end vectors"""
 
@@ -119,64 +134,138 @@ class MovingIcon(SpunEntity):
     pass
 images.queue_spun(MovingIcon, "icons", "move.png")
 
+# Cooldown keys. We use short strings b/c it looks legit
+cd_move="mv"
+cd_fight="atk"
+cd_recover="rcvr"
+# TODO What belongs to this class vs. Guy is a little vague,
+#   should be move obvious where to draw the line when there are more units.
 class Actor(Entity):
     obstructs = True
-    def __init__(self, pos):
+    def __init__(self, pos, team):
+        self.team = team
+        self.dead = False
+        self.cooldowns = {cd_move: self.lap_time, cd_fight: self.fight_windup_time, cd_recover: 0}
         super().__init__(pos)
         self.ai = None
-        self.task = None
+        self.tasks = []
         " We want perfect symmetry, so in the future certain teams might be 'flipped' when it comes to left/right tie-breaking "
         self.flip = 1
 
     def move(self, pos):
         super().move(pos)
-        self.move_charged = False
+        self.cooldowns[cd_move] = self.lap_time
+        self.cooldowns[cd_fight] = self.fight_windup_time
 
-    def handle_finish(self):
-        self.task = None
+    def handle_finish(self, task):
+        self.tasks.remove(task)
+        if self.ai != None:
+            # TODO as an optimization, there's probably no point in queueing the AI
+            #   if we have an un-cancellable task in progress. Leaving it unoptimized
+            #   for now, since it helps to make sure all the should_foo methods
+            #   appropriately handle edge cases
+            self.ai.queue_immediately()
+    def handle_cancel(self, task):
+        self.tasks.remove(task)
         if self.ai != None:
             self.ai.queue_immediately()
 
     def has_task(self, task):
-        self.task = task
-        task.then(self.handle_finish)
-        task.oncancel(self.handle_finish)
-    def charge_move(self):
-        self.has_task(tasks.ChargeMove(self, self.lap_time))
+        self.tasks.append(task)
+        task.onfinish(self.handle_finish)
+        task.oncancel(self.handle_cancel)
 
-    def should_move(self, angle):
+    def charge(self, cd_key):
+        " Returns whether the given cooldown is ready to be used, and starts it charging if possible "
+        # We can only charge one thing at a time
+        for t in self.tasks:
+            if type(t) == tasks.Charge and t.cd_key != cd_key:
+                # Charging something else is just about the only thing we can interrupt at the moment
+                continue
+            return False
+        # If we get to this point, any tasks left can be cancelled
+        for t in self.tasks:
+            t.cancel()
+        # If it's already charged, we don't even have to make a task!
+        # We still are correct to have cancelled the other tasks though;
+        # typically using a cooldown means we want the others to stop charging.
+        if self.cooldowns[cd_key] == 0:
+            return True
+        self.has_task(tasks.Charge(self, cd_key))
+        return False
+
+    def take_hit(self):
+        self.has_task(tasks.Die(self))
+
+    def should_navigate(self, pos):
+        delta = vec_add(pos, vec_mult(self.pos, -1))
+        angles = calc_angles(delta, self.flip)
+        for angle in angles:
+            if self.try_move(angle) != False:
+                return
+        return False
+    def try_move(self, angle):
+        # Charge first before checking destinations;
+        # some obstructions are temporary, and we don't want to report a failure
+        # until we're actually ready to move and the obstacle is still there.
+        if not self.charge(cd_move):
+            return
         dest = vec_add(self.pos, unit_vecs[angle])
         if not is_walkable(get_tile(dest)):
             return False
-        if isinstance(self.task, tasks.ChargeMove):
-            return
-        if self.task != None:
-            self.task.cancel()
-        if not self.move_charged:
-            self.charge_move()
-            return
         self.has_task(tasks.TokenResolver(self, MoveClaimToken(dest)))
+    def should_fight(self, target):
+        if not self.charge(cd_fight):
+            return
+        out("Stab stab stab %s->%s" % (self.pos, target.pos))
+        self.cooldowns[cd_move] = self.lap_time
+        self.cooldowns[cd_fight] = self.fight_windup_time
+        self.has_task(tasks.Hit(target))
+    def should_target(self, target):
+        if self.is_loc_in_range(target.pos):
+            return self.should_fight(target)
+        else:
+            return self.should_navigate(target.pos)
     def should_chill(self):
-        if self.task == None and not self.move_charged:
-            self.charge_move()
+        self.charge(cd_fight) and self.charge(cd_move)
+    def should_autofight(self):
+        for loc in self.get_locs_in_range():
+            target = self.choose_target(loc)
+            if target != None:
+                if False == self.should_fight(target):
+                    out("ERROR: should_fight returned False for a location in range with a valid target. %s %s->%s" % (self.__class__.__name__, str(self.pos), str(loc)))
+                return
+        return False
 
+    def is_loc_in_range(self, loc):
+        # TODO This can be made more efficient, need a vec_size function or something
+        return loc in self.get_locs_in_range()
     def customhash(self):
-        if self.ai == None:
-            return super().customhash()
-        return (super().customhash(), self.ai.customhash())
+        return (super().customhash(), self.team, self.ai)
 
-class TeamedActor(Actor):
+class TeamSkinnedActor(Actor):
     def __init__(self, pos, team):
         self.image = self.teamed_images[team]
-        self.team = team
-        super().__init__(pos)
-    def customhash(self):
-        return (self.team, super().customhash())
-
-class Guy(TeamedActor):
-    def __init__(self, pos, team):
         super().__init__(pos, team)
+
+class MeleeActor(Actor):
+    def choose_target(self, loc):
+        tile = get_tile(loc)
+        for x in tile:
+            if isinstance(x, Actor) and x.team != self.team:
+                return x
+        return None
+    def get_locs_in_range(self):
+        # TODO This should use team orientation / flip to return target preferences in a "fair" order
+        return [vec_add(self.pos, unit_vecs[angle]) for angle in range(6)]
+
+
+class Guy(TeamSkinnedActor, MeleeActor):
+    def __init__(self, pos, team):
         self.lap_time=360
+        self.fight_windup_time=180
+        self.fight_cooldown_time=360
+        super().__init__(pos, team)
 images.queue_teamed(Guy, "units", "guy2.png")
 """end entities"""
 
@@ -266,8 +355,10 @@ class Ai(tasks.Task):
         ent.ai = self
         self.is_queued = False
         self.queue_immediately()
-    def _run(self):
-        super()._run()
+    def run(self):
+        if self.ent.dead:
+            return False
+        self.think()
         self.is_queued = False
     def queue_immediately(self):
         if self.is_queued:
@@ -276,18 +367,6 @@ class Ai(tasks.Task):
         tasks.immediately(tasks.THINK_PATIENCE, self)
     def draw_symbols(self):
         pass
-class WallAi(Ai):
-    def __init__(self, ent):
-        super().__init__(ent)
-        self.angle = 0
-    def run(self):
-        for i in range(6):
-            new_angle = (self.angle + i) % 6
-            if self.ent.should_move(new_angle) != False:
-                self.angle = new_angle
-                return
-        #eprint("Couldn't find anywhere to go, shutting down")
-        self.ent.should_chill()
 class Command:
     def __init__(self, mode):
         self.mode = mode
@@ -305,7 +384,7 @@ class ControlledAi(Ai):
         self.todo = []
     def todo_now(self, command):
         self.todo = [command]
-        tasks.Lambda(self.queue_immediately, 0)
+        self.queue_immediately()
     def todo_next(self, command):
         if self.todo:
             self.todo.append(command)
@@ -316,7 +395,7 @@ class ControlledAi(Ai):
         if not tile:
             return None
         return GotoCommand(pos)
-    def run(self):
+    def think(self):
         "Each time this loop restarts we assume the previous command 'completed'"
         "So we have to throw in a fake command for the first iteration"
         self.todo.insert(0, None)
@@ -327,14 +406,12 @@ class ControlledAi(Ai):
                 return
             command = self.todo[0]
             if command.mode == "goto":
-                delta = vec_add(command.pos, vec_mult(self.ent.pos, -1))
-                if delta == (0, 0):
+                if command.pos == self.ent.pos:
                     continue
-                flip = self.ent.flip
-                angle = calc_angle(delta, flip)
-                for delt in [0, flip, -flip]:
-                    if self.ent.should_move((angle+delt+6)%6) != False:
-                        return
+                if self.ent.should_autofight() != False:
+                    return
+                if self.ent.should_navigate(command.pos) != False:
+                    return
                 " Else, no path, abort command and fall thru "
             else:
                 raise "Unknown command mode '%s'" % command.mode
@@ -360,7 +437,7 @@ def mouse_to_tile(x, y):
 def get_selectable(pos, team):
     contents = get_tile(pos)
     for x in get_tile(pos):
-        if isinstance(x, TeamedActor) and x.team in team:
+        if isinstance(x, Actor) and x.team in team:
             return x
 def send_tile_command(ent, pos, append):
     ai = ent.ai
@@ -444,15 +521,15 @@ def out(x):
 
 def do_step(requested_time):
     next_time = tasks.next_time()
-    while next_time <= requested_time:
+    while next_time < requested_time:
         requested_time -= next_time
         delay(next_time)
-        tasks.run(next_time)
+        tasks.wait_time(next_time)
+        tasks.run()
         pg.display.update()
         next_time = tasks.next_time()
     delay(requested_time)
-    "Won't run anything, but moves times up"
-    tasks.run(requested_time)
+    tasks.wait_time(requested_time)
 
 selected = None
 def select(target):
@@ -648,11 +725,7 @@ def main():
     pg.display.update()
     tasks.Keepalive()
 
-    # Board setup stuff. Some things expect to happen in the framework of task evaluation,
-    # e.g. tasks.immediately() calls work as expected,
-    # so we throw the initial setup into the 0th "turn"
-    tasks.Lambda(spawn_units, 0)
-    do_step(0)
+    spawn_units()
 
     if len(sys.argv) > 4:
         host_hint = fast_forward_from_log(sys.argv[4])
@@ -661,8 +734,6 @@ def main():
         host_hint = False
         logfile = gzip.open(log_filename, "wb")
 
-    #tasks.Lambda(lambda: ControlledAi(Guy((2,2))), 360)
-    #tasks.Lambda(lambda: WallAi(Guy((2,2))), 360*5)
     # Setup input. This probably only works on Linux
     out("Initializing inputs")
     console_reader = io.open(sys.stdin.fileno())

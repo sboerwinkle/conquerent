@@ -7,11 +7,12 @@ Done
 / Split into modules
 / Proper command queueing / replacement (shift)
 / Syncing / "host" flag
+/ Put on Git
 
 Important
 =========
 - improved pathing
-	- Pick direction more intelligently when there's bias to be had
+	/ Pick direction more intelligently when there's bias to be had
 	- When blocked, use listeners to resume when there's a path
 		Including when multiple clear at once I suppose
 - Attack
@@ -23,7 +24,6 @@ Important
 			And also they trigger when placed?
 			And they don't do anything other than decide if they should queue the AI??????
 - Better command indication - shade all target cells, circle selected target cell
-- Put on Git
 
 Not Important
 =============

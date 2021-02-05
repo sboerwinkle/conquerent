@@ -1,26 +1,27 @@
 """Definitions for various types of tasks, and the machinery needed to run them"""
 
 class Task:
-    def __init__(self, time=None):
+    def __init__(self, time=None, patience=0):
         self.listeners = []
         self.cancel_listeners = []
         self.time = time
+        self.patience = patience
         if time != None:
             _pending.append(self)
-    def then(self, listener):
+    def onfinish(self, listener):
         self.listeners.append(listener)
     def oncancel(self, listener):
         self.cancel_listeners.append(listener)
     def _run(self):
         result = self.run()
-        if isinstance(result, Task):
-            "We can return a task to indicate a continuation, in that the original task's work isn't finished"
-            "Combine the listener lists, and then point them to the same reference"
-            self.listeners.extend(result.listeners)
-            result.listeners = self.listeners
-            self.cancel_listeners.extend(result.cancel_listeners)
-            result.cancel_listeners = self.cancel_listeners
-            return
+        #if isinstance(result, Task):
+        #    "We can return a task to indicate a continuation, in that the original task's work isn't finished"
+        #    "Combine the listener lists, and then point them to the same reference"
+        #    self.listeners.extend(result.listeners)
+        #    result.listeners = self.listeners
+        #    self.cancel_listeners.extend(result.cancel_listeners)
+        #    result.cancel_listeners = self.cancel_listeners
+        #    return
 
         if result == None:
             to_run = self.listeners
@@ -29,11 +30,11 @@ class Task:
         else:
             raise Exception('Weird result from task', result)
         for l in to_run:
-            l()
+            l(self)
     def cancel(self):
         _pending.remove(self)
         for l in self.cancel_listeners:
-            l()
+            l(self)
     def customhash(self):
         return (self.__class__.__name__, self.time)
 class Keepalive(Task):
@@ -50,13 +51,16 @@ class Move(Task):
     def run(self):
         """...eprint("Removing token")"""
         self.ent.move(self.pos)
-class ChargeMove(Task):
-    def __init__(self, ent, time):
-        super().__init__(time)
+class Charge(Task):
+    def __init__(self, ent, cd_key):
+        self.cd_key = cd_key
         self.ent = ent
+        super().__init__(ent.cooldowns[cd_key])
     def run(self):
-        """...eprint("Charged!")"""
-        self.ent.move_charged = True
+        self.ent.cooldowns[self.cd_key] = 0
+    def cancel(self):
+        self.ent.cooldowns[self.cd_key] = self.time
+        super().cancel()
 class TokenResolver(Task):
     def __init__(self, actor, token):
         super().__init__()
@@ -72,10 +76,29 @@ class TokenResolver(Task):
             """...eprint("Move accepted")"""
             task = Move(actor, token.pos)
             immediately(ACT_PATIENCE, task)
-            return task
+            actor.has_task(task)
+            return
         else:
             """...eprint("Couldn't move, conflicted")"""
             return False
+class Hit(Task):
+    def __init__(self, target):
+        super().__init__()
+        # Hitting is an action, and resolves with the other actions
+        immediately(ACT_PATIENCE, self)
+        self.target = target
+    def run(self):
+        self.target.take_hit()
+class Die(Task):
+    def __init__(self, actor):
+        super().__init__()
+        # Only reason this isn't just a method is because there are other concurrent actions that might want to go through
+        immediately(0, self)
+        self.actor = actor
+    def run(self):
+        self.actor.move(None)
+        self.actor.dead = True
+
 class Lambda(Task):
     def __init__(self, l, time = None):
         super().__init__(time)
@@ -85,41 +108,51 @@ class Lambda(Task):
 
 _pending=[]
 _immediates=[[]]
+running = False
 THINK_PATIENCE=1
 ACT_PATIENCE=2
 def immediately(patience, task):
     "add the task to the (patience)th immediate list."
     "If there aren't that many immediate lists yet, pad with empty lists."
-    while len(_immediates) <= patience:
-        _immediates.append([])
-    _immediates[patience].append(task)
+    if running:
+        while len(_immediates) <= patience:
+            _immediates.append([])
+        _immediates[patience].append(task)
+    else:
+        task.time = 0
+        task.patience = patience
+        _pending.append(task)
 def next_time():
     return min([t.time for t in _pending])
-def run(time):
+def wait_time(time):
+    if time > next_time():
+        raise Exception("Having a bad time")
+    for t in _pending:
+        t.time -= time
+def run():
+    global running
+    running = True
     global _pending
     """...eprint("----------")"""
-    to_run = _immediates[0]
     others = []
     for t in _pending:
-        if t.time == time:
-            to_run.append(t)
-        elif t.time > time:
-            t.time -= time
-            others.append(t)
+        if t.time == 0:
+            immediately(t.patience, t)
         else:
-            raise "Wrong time!"
+            others.append(t)
     _pending = others
-    more_left = True
-    while more_left:
+    while True:
+        for i in range(0, len(_immediates)):
+            if _immediates[i]:
+                """...eprint("-" * i)"""
+                tmp = _immediates[i]
+                _immediates[i] = []
+                _immediates[0] = tmp
+                break
+        else:
+            break # The dreaded python for/else construct
         to_run = _immediates[0]
         while to_run:
             t = to_run.pop(0)
             t._run()
-        more_left = False
-        for i in range(1, len(_immediates)):
-            if _immediates[i]:
-                """...eprint("-" * i)"""
-                _immediates[0] = _immediates[i]
-                _immediates[i] = []
-                more_left = True
-                break
+    running = False
