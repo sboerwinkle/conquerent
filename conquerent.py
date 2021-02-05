@@ -201,26 +201,28 @@ class Actor(Entity):
         delta = vec_add(pos, vec_mult(self.pos, -1))
         angles = calc_angles(delta, self.flip)
         for angle in angles:
-            if self.try_move(angle) != False:
-                return
+            if self.try_move(angle):
+                return True
         return False
     def try_move(self, angle):
         # Charge first before checking destinations;
         # some obstructions are temporary, and we don't want to report a failure
         # until we're actually ready to move and the obstacle is still there.
         if not self.charge(cd_move):
-            return
+            return True
         dest = vec_add(self.pos, unit_vecs[angle])
         if not is_walkable(get_tile(dest)):
             return False
         self.has_task(tasks.TokenResolver(self, MoveClaimToken(dest)))
+        return True
     def should_fight(self, target):
         if not self.charge(cd_fight):
-            return
+            return True
         out("Stab stab stab %s->%s" % (self.pos, target.pos))
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = self.fight_windup_time
         self.has_task(tasks.Hit(target))
+        return True
     def should_target(self, target):
         if self.is_loc_in_range(target.pos):
             return self.should_fight(target)
@@ -228,13 +230,14 @@ class Actor(Entity):
             return self.should_navigate(target.pos)
     def should_chill(self):
         self.charge(cd_fight) and self.charge(cd_move)
+        return True
     def should_autofight(self):
         for loc in self.get_locs_in_range():
             target = self.choose_target(loc)
             if target != None:
-                if False == self.should_fight(target):
+                if not self.should_fight(target):
                     out("ERROR: should_fight returned False for a location in range with a valid target. %s %s->%s" % (self.__class__.__name__, str(self.pos), str(loc)))
-                return
+                return True
         return False
 
     def is_loc_in_range(self, loc):
@@ -402,15 +405,13 @@ class ControlledAi(Ai):
         while True:
             self.todo.pop(0)
             if not self.todo:
-                self.ent.should_chill()
+                self.ent.should_autofight() or self.ent.should_chill()
                 return
             command = self.todo[0]
             if command.mode == "goto":
                 if command.pos == self.ent.pos:
                     continue
-                if self.ent.should_autofight() != False:
-                    return
-                if self.ent.should_navigate(command.pos) != False:
+                if self.ent.should_autofight() or self.ent.should_navigate(command.pos):
                     return
                 " Else, no path, abort command and fall thru "
             else:
