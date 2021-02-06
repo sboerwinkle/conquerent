@@ -45,7 +45,7 @@ class Keepalive(Task):
         Keepalive()
 class Move(Task):
     def __init__(self, ent, pos):
-        super().__init__()
+        super().__init__(patience=ACT_PATIENCE)
         self.ent = ent
         self.pos = pos
     def run(self):
@@ -92,12 +92,11 @@ class Hit(Task):
 class Die(Task):
     def __init__(self, actor):
         super().__init__()
-        # Only reason this isn't just a method is because there are other concurrent actions that might want to go through
+        # Only reason this isn't just a method is because there are other concurrent actions that might want to go through, like moving
         immediately(0, self)
         self.actor = actor
     def run(self):
-        self.actor.move(None)
-        self.actor.dead = True
+        self.actor.die()
 
 class Lambda(Task):
     def __init__(self, l, time = None):
@@ -111,6 +110,15 @@ _immediates=[[]]
 running = False
 THINK_PATIENCE=1
 ACT_PATIENCE=2
+def schedule(task, time, patience=None):
+    if patience != None:
+        task.patience = patience
+    "Some tasks will auto-schedule themselves on construction, but this is good for the others."
+    if time == 0:
+        immediately(task.patience, task) # This makes sense right?
+    else:
+        task.time = time
+        _pending.append(task)
 def immediately(patience, task):
     "add the task to the (patience)th immediate list."
     "If there aren't that many immediate lists yet, pad with empty lists."

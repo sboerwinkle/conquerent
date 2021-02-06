@@ -79,6 +79,7 @@ def calc_angles(v1, flip):
 class Entity:
     image = None
     obstructs = False
+    visible = True
     def __init__(self, pos = None):
         self.pos = None
         self.move(pos)
@@ -92,12 +93,12 @@ class Entity:
 
     def move(self, pos):
         if self.pos != None:
-            board[self.pos[0]][self.pos[1]].remove(self)
+            get_tile(self.pos).rm(self)
             """ TODO: Maybe should just dirty the tile? """
             draw_tile(self.pos)
         self.pos = pos
         if pos != None:
-            board[pos[0]][pos[1]].append(self)
+            get_tile(pos).add(self)
             self.draw(pos)
 
     def customhash(self):
@@ -105,6 +106,7 @@ class Entity:
 
 class MoveClaimToken(Entity):
     valid = True
+    visible = False
     def __init__(self, pos):
         super().__init__(pos)
         """...eprint("Token created")"""
@@ -113,8 +115,7 @@ class MoveClaimToken(Entity):
         super().move(pos)
         if pos == None:
             return
-        tile = get_tile(pos)
-        for ent in tile:
+        for ent in get_tile(pos).contents:
             if ent.__class__ == MoveClaimToken and ent != self:
                 self.valid = False
                 ent.valid = False
@@ -133,6 +134,16 @@ class SpunEntity(Entity):
 class MovingIcon(SpunEntity):
     pass
 images.queue_spun(MovingIcon, "icons", "move.png")
+
+def set_team_skin(self, team):
+    self.image = self.teamed_images[team]
+
+class Corpse(Entity):
+    obstructs = True
+    def __init__(self, pos, team):
+        set_team_skin(self, team)
+        super().__init__(pos)
+images.queue_teamed(Corpse, "units", "corpse.png")        
 
 # Cooldown keys. We use short strings b/c it looks legit
 cd_move="mv"
@@ -156,6 +167,13 @@ class Actor(Entity):
         super().move(pos)
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = self.fight_windup_time
+
+    def die(self):
+        corpse = Corpse(self.pos, self.team)
+        self.move(None)
+        self.dead = True
+        # This can't happen w/ zero patience, since it happens concurrently with people planning moves
+        tasks.schedule(tasks.Move(corpse, None), 90)
 
     def handle_finish(self, task):
         self.tasks.remove(task)
@@ -218,7 +236,6 @@ class Actor(Entity):
     def should_fight(self, target):
         if not self.charge(cd_fight):
             return True
-        out("Stab stab stab %s->%s" % (self.pos, target.pos))
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = self.fight_windup_time
         self.has_task(tasks.Hit(target))
@@ -232,12 +249,16 @@ class Actor(Entity):
         self.charge(cd_fight) and self.charge(cd_move)
         return True
     def should_autofight(self):
-        for loc in self.get_locs_in_range():
+        locs = self.get_locs_in_range()
+        for loc in locs:
             target = self.choose_target(loc)
             if target != None:
                 if not self.should_fight(target):
                     out("ERROR: should_fight returned False for a location in range with a valid target. %s %s->%s" % (self.__class__.__name__, str(self.pos), str(loc)))
                 return True
+        # If we were told to autofight, alert the AI if our options change
+        for loc in locs:
+            self.ai.watch(loc)
         return False
 
     def is_loc_in_range(self, loc):
@@ -246,15 +267,9 @@ class Actor(Entity):
     def customhash(self):
         return (super().customhash(), self.team, self.ai)
 
-class TeamSkinnedActor(Actor):
-    def __init__(self, pos, team):
-        self.image = self.teamed_images[team]
-        super().__init__(pos, team)
-
 class MeleeActor(Actor):
     def choose_target(self, loc):
-        tile = get_tile(loc)
-        for x in tile:
+        for x in get_tile(loc).contents:
             if isinstance(x, Actor) and x.team != self.team:
                 return x
         return None
@@ -263,8 +278,9 @@ class MeleeActor(Actor):
         return [vec_add(self.pos, unit_vecs[angle]) for angle in range(6)]
 
 
-class Guy(TeamSkinnedActor, MeleeActor):
+class Guy(MeleeActor):
     def __init__(self, pos, team):
+        set_team_skin(self, team)
         self.lap_time=360
         self.fight_windup_time=180
         self.fight_cooldown_time=360
@@ -299,12 +315,33 @@ def clear_symbols():
 
 """tiles"""
 """Tiles don't do anything, so I don't need to ever instantiate more than one of each type"""
-tile_grass = Entity()
-images.queue(tile_grass, "tiles", "grass.png")
+grass_ent = Entity()
+images.queue(grass_ent, "tiles", "grass.png")
 
 """end tiles"""
 
 """board"""
+class Tile:
+    def __init__(self, contents):
+        self.contents = contents
+        self.watchers = []
+    def add(self, ent):
+        self.contents.append(ent)
+        if ent.visible:
+            for l in self.watchers:
+                l.tile_update()
+    def rm(self, ent):
+        self.contents.remove(ent)
+        if ent.visible:
+            for l in self.watchers:
+                l.tile_update()
+    def customhash(self):
+        return (self.contents, len(self.watchers))
+def complain(self):
+    raise Exception("Invalid operation")
+invalid_tile = Tile([])
+invalid_tile.add = complain # Does this even work? Hope so!
+invalid_tile.rm = complain
 BOARD=[[0,0,0,2,1,1,3],
         [0,0,1,2,0,3,1],
          [0,1,0,1,1,0,1],
@@ -315,17 +352,18 @@ BOARD=[[0,0,0,2,1,1,3],
 screen_offset_x = -TILE_WIDTH
 screen_offset_y = 0
 
-board = [[[tile_grass] if code!=0 else [] for code in row] for row in BOARD]
+board = [[Tile([grass_ent] if code!=0 else []) for code in row] for row in BOARD]
 
 def get_tile(pos):
     (x, y) = pos
     if x < 0 or x >= len(board):
-        return []
+        return invalid_tile
     row = board[x]
     if y < 0 or y >= len(row):
-        return []
+        return invalid_tile
     return row[y]
-def is_walkable(ents):
+def is_walkable(tile):
+    ents = tile.contents
     if not ents:
         return False
     for e in ents:
@@ -341,7 +379,7 @@ def tile_to_screen(pos):
 
 def draw_tile(pos):
     (x,y)=pos
-    for entity in board[x][y]:
+    for entity in board[x][y].contents:
         entity.draw(pos)
 
 def draw_all_tiles():
@@ -355,19 +393,35 @@ class Ai(tasks.Task):
     def __init__(self, ent):
         super().__init__()
         self.ent = ent
+        self.tiles = set()
         ent.ai = self
         self.is_queued = False
         self.queue_immediately()
+    def watch(self, pos):
+        self.tiles.add(pos)
+        if not self.is_queued:
+            raise Exception("AIs are only supposed to watch() while think()ing, and this clearly isn't!")
+    def clear_tiles(self):
+        # TODO should clear on death, just for cleanliness
+        for pos in self.tiles:
+            get_tile(pos).watchers.remove(self)
+        self.tiles = set()
     def run(self):
         if self.ent.dead:
             return False
+        self.clear_tiles()
         self.think()
         self.is_queued = False
+        for pos in self.tiles:
+            get_tile(pos).watchers.append(self)
     def queue_immediately(self):
         if self.is_queued:
             return
+        self.clear_tiles()
         self.is_queued = True
         tasks.immediately(tasks.THINK_PATIENCE, self)
+    def tile_update(self):
+        self.queue_immediately()
     def draw_symbols(self):
         pass
 class Command:
@@ -394,10 +448,9 @@ class ControlledAi(Ai):
         else:
             self.todo_now(command)
     def mk_tile_command(self, pos):
-        tile = get_tile(pos)
-        if not tile:
-            return None
-        return GotoCommand(pos)
+        if get_tile(pos).contents:
+            return GotoCommand(pos)
+        return None
     def think(self):
         "Each time this loop restarts we assume the previous command 'completed'"
         "So we have to throw in a fake command for the first iteration"
@@ -413,7 +466,7 @@ class ControlledAi(Ai):
                     continue
                 if self.ent.should_autofight() or self.ent.should_navigate(command.pos):
                     return
-                " Else, no path, abort command and fall thru "
+                #Else, no path, abort command and fall thru
             else:
                 raise "Unknown command mode '%s'" % command.mode
     def draw_symbols(self):
@@ -436,8 +489,7 @@ def mouse_to_tile(x, y):
     return (row, col)
 
 def get_selectable(pos, team):
-    contents = get_tile(pos)
-    for x in get_tile(pos):
+    for x in get_tile(pos).contents:
         if isinstance(x, Actor) and x.team in team:
             return x
 def send_tile_command(ent, pos, append):
