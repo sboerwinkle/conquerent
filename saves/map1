@@ -1,0 +1,103 @@
+:mk grass 00 05
+:mk grass 00 06
+:mk grass 00 09
+:mk grass 00 10
+:mk grass 01 04
+:mk grass 01 05
+:mk grass 01 06
+:mk grass 01 07
+:mk grass 01 08
+:mk grass 01 09
+:mk grass 01 10
+:mk grass 02 03
+:mk grass 02 04
+:mk grass 02 05
+:mk grass 02 06
+:mk grass 02 07
+:mk grass 02 08
+:mk grass 02 09
+:mk grass 02 10
+:mk grass 03 02
+:mk grass 03 04
+:mk grass 03 05
+:mk grass 03 06
+:mk grass 03 07
+:mk grass 03 08
+:mk grass 03 10
+:mk grass 04 01
+:mk grass 04 02
+:mk grass 04 03
+:mk grass 04 05
+:mk grass 04 06
+:mk grass 04 08
+:mk grass 04 09
+:mk grass 04 10
+:mk grass 05 00
+:mk grass 05 01
+:mk grass 05 02
+:mk grass 05 03
+:mk grass 05 04
+:mk grass 05 05
+:mk grass 05 06
+:mk grass 05 07
+:mk grass 05 08
+:mk grass 05 09
+:mk grass 05 10
+:mk grass 06 00
+:mk grass 06 01
+:mk grass 06 02
+:mk grass 06 03
+:mk grass 06 04
+:mk grass 06 05
+:mk grass 06 06
+:mk grass 06 07
+:mk grass 06 08
+:mk grass 06 09
+:mk grass 07 01
+:mk grass 07 02
+:mk grass 07 03
+:mk grass 07 05
+:mk grass 07 06
+:mk grass 07 07
+:mk grass 08 01
+:mk grass 08 02
+:mk grass 08 03
+:mk grass 08 04
+:mk grass 08 05
+:mk grass 08 06
+:mk grass 09 00
+:mk grass 09 01
+:mk grass 09 02
+:mk grass 09 04
+:mk grass 09 05
+:mk grass 09 06
+:mk grass 10 00
+:mk grass 10 01
+:mk grass 10 02
+:mk grass 10 03
+:mk grass 10 04
+:mk grass 10 05
+:mk guy 00 05 00
+:mk guy 00 06 00
+:mk guy 01 04 00
+:mk guy 01 05 00
+:mk guy 00 09 01
+:mk guy 00 10 01
+:mk guy 01 09 01
+:mk guy 01 10 01
+:mk guy 04 01 05
+:mk guy 05 00 05
+:mk guy 05 01 05
+:mk guy 06 00 05
+:mk guy 04 10 02
+:mk guy 05 09 02
+:mk guy 05 10 02
+:mk guy 06 09 02
+:mk guy 09 00 04
+:mk guy 09 01 04
+:mk guy 10 00 04
+:mk guy 10 01 04
+:mk guy 09 05 03
+:mk guy 09 06 03
+:mk guy 10 04 03
+:mk guy 10 05 03

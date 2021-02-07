@@ -6,8 +6,8 @@ Much credit goes to the pygame maintainers for their wondeful, many-exampled lib
 """
 
 #Change this stuff as you desire
-SCREEN_WIDTH=500
-SCREEN_HEIGHT=500
+SCREEN_WIDTH=550
+SCREEN_HEIGHT=480
 DELAY_FACTOR=3.0
 
 #Probably should not change this stuff
@@ -94,12 +94,11 @@ class Entity:
     def move(self, pos):
         if self.pos != None:
             get_tile(self.pos).rm(self)
-            """ TODO: Maybe should just dirty the tile? """
-            draw_tile(self.pos)
+            dirty_tiles.add(self.pos)
         self.pos = pos
         if pos != None:
             get_tile(pos).add(self)
-            self.draw(pos)
+            dirty_tiles.add(pos)
 
     def customhash(self):
         return (self.__class__.__name__, self.pos)
@@ -168,12 +167,16 @@ class Actor(Entity):
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = self.fight_windup_time
 
-    def die(self):
-        corpse = Corpse(self.pos, self.team)
+    def disintegrate(self):
         self.move(None)
         self.dead = True
-        # This can't happen w/ zero patience, since it happens concurrently with people planning moves
+        if self.ai != None:
+            self.ai.clear_watches()
+
+    def die(self):
+        corpse = Corpse(self.pos, self.team)
         tasks.schedule(tasks.Move(corpse, None), 90)
+        self.disintegrate()
 
     def handle_finish(self, task):
         self.tasks.remove(task)
@@ -293,12 +296,11 @@ symbols = []
 class Symbol:
     def __init__(self, pos):
         self.pos = pos
-        self.draw()
         symbols.append(self)
     def draw(self):
         screen.blit(self.image, tile_to_screen(self.pos))
     def clear(self):
-        draw_tile(self.pos)
+        dirty_tiles.add(self.pos)
     # Symbols are NOT hashed, they're part of local user HUD
 class SelectSymbol(Symbol):
     pass
@@ -314,9 +316,9 @@ def clear_symbols():
 """end symbols"""
 
 """tiles"""
-"""Tiles don't do anything, so I don't need to ever instantiate more than one of each type"""
-grass_ent = Entity()
-images.queue(grass_ent, "tiles", "grass.png")
+class TerrainGrass(Entity):
+    pass
+images.queue(TerrainGrass, "tiles", "grass.png")
 
 """end tiles"""
 
@@ -342,17 +344,11 @@ def complain(self):
 invalid_tile = Tile([])
 invalid_tile.add = complain # Does this even work? Hope so!
 invalid_tile.rm = complain
-BOARD=[[0,0,0,2,1,1,3],
-        [0,0,1,2,0,3,1],
-         [0,1,0,1,1,0,1],
-          [7,7,1,1,1,4,4],
-           [1,0,1,1,0,1,0],
-            [1,6,0,5,1,0,0],
-             [6,1,1,5,0,0,0]]
-screen_offset_x = -TILE_WIDTH
+
+screen_offset_x = -TILE_WIDTH*5//2
 screen_offset_y = 0
 
-board = [[Tile([grass_ent] if code!=0 else []) for code in row] for row in BOARD]
+board = [[Tile([]) for i in range(11)] for j in range(11)]
 
 def get_tile(pos):
     (x, y) = pos
@@ -382,10 +378,25 @@ def draw_tile(pos):
     for entity in board[x][y].contents:
         entity.draw(pos)
 
-def draw_all_tiles():
-    for x in range(0, len(board)):
-        for y in range(0, len(board[x])):
-            draw_tile((x, y))
+screen_dirty = True
+dirty_tiles = set()
+def redraw():
+    global screen_dirty
+    global dirty_tiles
+    if screen_dirty:
+        screen_dirty = False
+        screen.fill(0x000000)
+        for x in range(0, len(board)):
+            for y in range(0, len(board[x])):
+                draw_tile((x, y))
+    else:
+        for pos in dirty_tiles:
+            draw_tile(pos)
+    dirty_tiles = set()
+    for s in symbols:
+        # TODO This should be improved if possible to track dirtiness, like tiles
+        s.draw()
+    pg.display.update()
 """end rendering"""
 
 """ai"""
@@ -401,7 +412,7 @@ class Ai(tasks.Task):
         self.tiles.add(pos)
         if not self.is_queued:
             raise Exception("AIs are only supposed to watch() while think()ing, and this clearly isn't!")
-    def clear_tiles(self):
+    def clear_watches(self):
         # TODO should clear on death, just for cleanliness
         for pos in self.tiles:
             get_tile(pos).watchers.remove(self)
@@ -409,7 +420,7 @@ class Ai(tasks.Task):
     def run(self):
         if self.ent.dead:
             return False
-        self.clear_tiles()
+        self.clear_watches()
         self.think()
         self.is_queued = False
         for pos in self.tiles:
@@ -417,7 +428,7 @@ class Ai(tasks.Task):
     def queue_immediately(self):
         if self.is_queued:
             return
-        self.clear_tiles()
+        self.clear_watches()
         self.is_queued = True
         tasks.immediately(tasks.THINK_PATIENCE, self)
     def tile_update(self):
@@ -543,7 +554,16 @@ def resume_net_input():
 
 def fast_forward_from_log(src_filename):
     try:
-        shutil.copyfile(src_filename, log_filename)
+        if src_filename[-3:] == ".gz":
+            out("Interpreting .gz save as gzipped")
+            shutil.copyfile(src_filename, log_filename)
+        else:
+            out("Interpreting non-.gz save as plain text (gzipping working copy)")
+            tmp_in = open(src_filename, 'rb')
+            tmp_out = gzip.open(log_filename, 'wb')
+            tmp_out.write(tmp_in.read())
+            tmp_in.close()
+            tmp_out.close()
     except:
         traceback.print_exc()
         eprint("Issue while trying to load from save '%s'" % src_filename)
@@ -573,13 +593,14 @@ def out(x):
     sys.stdout.flush()
 
 def do_step(requested_time):
+    # TODO Draw "loading" bar?
     next_time = tasks.next_time()
     while next_time < requested_time:
         requested_time -= next_time
         delay(next_time)
         tasks.wait_time(next_time)
         tasks.run()
-        pg.display.update()
+        redraw()
         next_time = tasks.next_time()
     delay(requested_time)
     tasks.wait_time(requested_time)
@@ -595,7 +616,7 @@ def select(target):
         SelectSymbol(selected)
         if target.ai != None:
             target.ai.draw_symbols()
-    pg.display.update()
+    redraw()
 
 def handle_net_bytes(orig_bytes, do_log = True):
     if orig_bytes[0:1] == b'#':
@@ -648,17 +669,33 @@ def handle_net_command(who, command, line):
         what = args[0]
         if what == 'guy':
             f = Guy
-        elif what == 'move':
-            f = MovingIcon
+        elif what == 'grass':
+            f = TerrainGrass
         else:
             out("Don't know how to make a '%s'" % what)
             return
         pos = (int(args[1]), int(args[2]))
         if len(args) == 4:
-            f(pos, int(args[3]))
+            created = f(pos, int(args[3]))
         else:
-            f(pos)
-        pg.display.update()
+            created = f(pos)
+        if what == 'guy':
+            ControlledAi(created)
+        redraw()
+        return
+    if command == "rm":
+        pos = (int(args[0]), int(args[1]))
+        content_copy = get_tile(pos).contents[:]
+        for ent in content_copy:
+            if isinstance(ent, Actor):
+                ent.disintegrate()
+            else:
+                ent.move(None)
+        # Have to redraw the whole screen, since there's nothing left on that tile
+        # to cover up the previous pixels there
+        global screen_dirty
+        screen_dirty = True
+        redraw()
         return
     if command == "join":
         out("> %s has joined" % who)
@@ -696,7 +733,7 @@ def handle_net_command(who, command, line):
             break
     else:
         out("Couldn't find seat for input %s:%s %s" % (who, command, line))
-        return
+        return False
 
     if command == "T":
         seat.time = int(line)
@@ -733,16 +770,6 @@ def handle_net_command(who, command, line):
     out("> %s issued unknown command %s" % (who, command))
     return False
 
-def spawn_units():
-    for x in range(len(BOARD)):
-        col = BOARD[x]
-        for y in range(len(col)):
-            cell = col[y]
-            if cell <= 1:
-                continue
-            team = cell - 2
-            ControlledAi(Guy((x,y), team))
-
 def send(msg):
     server.send((localname + ":" + msg).encode('utf-8'))
 
@@ -774,11 +801,8 @@ def main():
     screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     images.load_queued()
 
-    draw_all_tiles()
-    pg.display.update()
+    redraw()
     tasks.Keepalive()
-
-    spawn_units()
 
     if len(sys.argv) > 4:
         host_hint = fast_forward_from_log(sys.argv[4])

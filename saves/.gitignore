@@ -1,3 +1,7 @@
-# This file helps the saves/ directory be tracked
-*
-!.gitignore
+# This file was originally created just so the "saves/" directory was tracked.
+# Now it also manages tracking of maps vs local saves;
+# The game gzips everything by default, but things checked in should probably
+# be plain text to allow line diffs, so for now we use file type to guess if
+# something is a map to be committed or just a local save.
+
+*.gz

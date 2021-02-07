@@ -8,22 +8,54 @@ Done
 / Proper command queueing / replacement (shift)
 / Syncing / "host" flag
 / Put on Git
+/ Attacks
+/ Dynamic map nonsense
+	- Update README
 
 Important
 =========
+- Commit maps by allowing non-gzipped saves (magic number 0x1f8b)
 - improved pathing
 	/ Pick direction more intelligently when there's bias to be had
-	- When blocked, use listeners to resume when there's a path
-		Including when multiple clear at once I suppose
-- Attack
-	- Death "animation"
-	Attack should have a slight wind-up so there's an advantage to holding a space
-	- Listeners to neighboring spaces
-		- "die()" method on AI (called by die() on entity/actor) cleans up all active cell listeners
-		- Mechanics on the listeners themselves are quite simple - invoke with coords when contents trigger, end of story
-			And also they trigger when placed?
-			And they don't do anything other than decide if they should queue the AI??????
-- Better command indication - shade all target cells, circle selected target cell
+	- When blocked, use tile watchers to resume when there's a path
+- More sprite states to indicate "fight charged", "move charged", etc
+- More unit types: swordsman / archer / berserker / troll
+	Swordsman:
+		Base, what we have now.
+	Archer:
+		2 tile range
+		Much lower rate of fire
+		After a move, fire cooldown is even higher to get "set up"
+	Troll:
+		2 health
+		Regenerates, faster than the archer rate of fire
+		Not sure yet if regeneration is higher priority than obeying commands
+		Might move slower than base
+	Berserker:
+		Deals 2 damage per hit
+		Delay between "being killed" and dying, exactly long enough for one more attack
+	The general idea is Trolls > Archers > Berserkers > Trolls, with Swordsman being a cheap shitty unit.
+	Berserkers are also offensively biased, while Archers are defensively biased
+- Directional and handed-ness biases per team
+	e.g., on map1, every other team should have flip=-1 for "fair" pathing
+- More command options
+	Biggest concern here is with how to manage the unexpected over the next turn.
+	At the moment, queueing commands is actually not a priority.
+	So, a primary command can be "move here" or "kill this".
+		This can be issued in "exclusive mode", where it won't auto-attack in the process.
+			Exclusive move commands don't expire, so you can get something to stand still and do nothing.
+	Additional targets can be marked as well
+		In normal mode, these get priority if multiple things enter range at once
+		In exclusive mode, these are the only things that will be auto-attacked.
+		Maybe you can "additional target" a space to defend it?
+	Better command indication - shade all target move cells / attack cells appropriately
+- Larger, scrollable map
+- Capture / summon system
+	For now, this will probably consist of "keeps" and "farms", both of which are unwalkable.
+	"Move into" a keep or farm to capture it, consuming the unit (Cheap swordsman ideal here)
+	Farms give points to the controlling team; one "point" per complete turn held, but track it granularly
+	Keeps allow summoning units adjacent to them, for cost (and with cooldown)
+- Use new centralized redraw() as a way to suspend drawing while in fast-forward
 
 Not Important
 =============
