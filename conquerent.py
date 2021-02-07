@@ -27,53 +27,7 @@ import traceback
 #Local imports
 import tasks, images
 from myhash import myhash
-
-"""vectors"""
-unit_vecs=[(1,0),(1,-1),(0,-1),(-1,0),(-1,1),(0,1)]
-def vec_add(v1, v2):
-    return (v1[0]+v2[0], v1[1]+v2[1])
-def vec_mult(v1, c):
-    return (v1[0]*c, v1[1]*c)
-
-# This function lovingly constructed on graph paper!
-# Returns a list of angles to try to reach that vector, in preference order.
-# Only returns angles that will reduce the "true" (euclidean) distance to the target.
-def calc_angles(v1, flip):
-    if v1 == (0,0):
-        return []
-    (x,y)=v1
-    def gr(a,b):
-        if flip == 1:
-            return a >= b
-        else:
-            return a > b
-    # e() handles when x >= y >= 0
-    def e(x,y):
-        if x == y:
-            return [0,5]
-        if x == 1 and y == 0:
-            return [0]
-        return [0,5,1]
-    # f() handles when x>=0 and y>=0
-    # This one is allowed to introduce a flip since e() doesn't care abt the value of flip
-    def f(x,y):
-        if gr(y,x):
-            return [5-a for a in e(y,x)]
-        return e(x,y)
-    # g() handles when y >= 0
-    def g(x,y):
-        if gr(0,x):
-            if gr(-x,y):
-                return [(a+4)%6 for a in f(y,-x-y)]
-            else:
-                return [(a+5)%6 for a in f(y+x,-x)]
-        else:
-            return f(x,y)
-    if y > 0 or (y == 0 and x*flip > 0):
-        return g(x,y)
-    return [(a+3)%6 for a in g(-x,-y)]
-
-"""end vectors"""
+import vector as vec
 
 """entities"""
 class Entity:
@@ -144,6 +98,9 @@ class Corpse(Entity):
         super().__init__(pos)
 images.queue_teamed(Corpse, "units", "corpse.png")        
 
+team_bias_flips=[1,-1,1,-1,1,-1]
+team_bias_angles=[a for a in range(6)]
+
 # Cooldown keys. We use short strings b/c it looks legit
 cd_move="mv"
 cd_fight="atk"
@@ -160,7 +117,8 @@ class Actor(Entity):
         self.ai = None
         self.tasks = []
         " We want perfect symmetry, so in the future certain teams might be 'flipped' when it comes to left/right tie-breaking "
-        self.flip = 1
+        self.bias_flip = team_bias_flips[team]
+        self.bias_angle = team_bias_angles[team]
 
     def move(self, pos):
         super().move(pos)
@@ -219,8 +177,8 @@ class Actor(Entity):
         self.has_task(tasks.Die(self))
 
     def should_navigate(self, pos):
-        delta = vec_add(pos, vec_mult(self.pos, -1))
-        angles = calc_angles(delta, self.flip)
+        delta = vec.add(pos, vec.mult(self.pos, -1))
+        angles = vec.calc_angles(delta, self.bias_flip)
         for angle in angles:
             if self.try_move(angle):
                 return True
@@ -230,11 +188,13 @@ class Actor(Entity):
         # some obstructions are temporary, and we don't want to report a failure
         # until we're actually ready to move and the obstacle is still there.
         if not self.charge(cd_move):
+            self.bias_angle = angle
             return True
-        dest = vec_add(self.pos, unit_vecs[angle])
+        dest = vec.add(self.pos, vec.units[angle])
         if not is_walkable(get_tile(dest)):
             return False
         self.has_task(tasks.TokenResolver(self, MoveClaimToken(dest)))
+        self.bias_angle = angle
         return True
     def should_fight(self, target):
         if not self.charge(cd_fight):
@@ -264,31 +224,63 @@ class Actor(Entity):
             self.ai.watch(loc)
         return False
 
-    def is_loc_in_range(self, loc):
-        # TODO This can be made more efficient, need a vec_size function or something
-        return loc in self.get_locs_in_range()
-    def customhash(self):
-        return (super().customhash(), self.team, self.ai)
-
-class MeleeActor(Actor):
     def choose_target(self, loc):
         for x in get_tile(loc).contents:
             if isinstance(x, Actor) and x.team != self.team:
                 return x
         return None
-    def get_locs_in_range(self):
-        # TODO This should use team orientation / flip to return target preferences in a "fair" order
-        return [vec_add(self.pos, unit_vecs[angle]) for angle in range(6)]
+    def is_loc_in_range(self, loc):
+        # TODO This can be made more efficient, need a vec.size function or something
+        return loc in self.get_locs_in_range()
+    def customhash(self):
+        return (super().customhash(), self.team, self.ai)
 
+class MeleeActor(Actor):
+    def get_locs_in_range(self):
+        ret = []
+        for x in [0,1,-1,2,-2,3]:
+            angle = (6 + x*self.bias_flip + self.bias_angle) % 6
+            ret.append(vec.add(self.pos, vec.units[angle]))
+        return ret
 
 class Guy(MeleeActor):
     def __init__(self, pos, team):
         set_team_skin(self, team)
         self.lap_time=360
         self.fight_windup_time=180
-        self.fight_cooldown_time=360
         super().__init__(pos, team)
 images.queue_teamed(Guy, "units", "guy2.png")
+
+class Archer(Actor):
+    def __init__(self, pos, team):
+        set_team_skin(self, team)
+        self.lap_time=360
+        self.fight_windup_time=360 + 180
+        super().__init__(pos, team)
+    def get_locs_in_range(self):
+        ret = []
+        # Firstly, target anyone adjacent.
+        # This is almost elegant, a list of angles offsets, as from MeleeActor.
+        for x in [0,-1,1,-2,2,-3]:
+            angle = (6 + x*self.bias_flip + self.bias_angle) % 6
+            ret.append(vec.add(self.pos, vec.units[angle]))
+        # Next, target people at range 2.
+        # This should favor the space "ahead" of us (according to bias_angle)
+        # and work back (in even pairs, resolving by bias_flip);
+        # unfortuately, I can't tink of an elegant way to do this :(
+        range_2_vecs = [
+            ( 2, 0),
+            ( 1, 1), ( 2,-1),
+            ( 0, 2), ( 2,-2),
+            (-1, 2), ( 1,-2),
+            (-2, 2), ( 0,-2),
+            (-2, 1), (-1,-1),
+            (-2, 0)
+        ]
+        for v in range_2_vecs:
+            ret.append(vec.add(self.pos, vec.transform(v, self.bias_flip, self.bias_angle)))
+        return ret
+images.queue_teamed(Archer, "units", "archer.png")
 """end entities"""
 
 """symbols"""
@@ -667,19 +659,24 @@ def handle_net_command(who, command, line):
         return False
     if command == "mk":
         what = args[0]
-        if what == 'guy':
+        unit=False
+        if what == 'S':
             f = Guy
+            unit=True
+        elif what == 'A':
+            f = Archer
+            unit=True
         elif what == 'grass':
             f = TerrainGrass
         else:
             out("Don't know how to make a '%s'" % what)
-            return
+            return False
         pos = (int(args[1]), int(args[2]))
         if len(args) == 4:
             created = f(pos, int(args[3]))
         else:
             created = f(pos)
-        if what == 'guy':
+        if unit:
             ControlledAi(created)
         redraw()
         return

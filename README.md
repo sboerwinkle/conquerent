@@ -53,8 +53,9 @@ Space to acknowledge the end of your turn.
 
 A "turn" is just a chunk of time during which units are allowed to operate, before the game pauses once again for new commands.
 During this time, units can move and attack; they move to follow commands, and attack anything in range.
-Note that a unit left idle will charge up first its attack, followed by its move, meaning it can then do either instantly when necessary.
-At the moment, this makes defending units rather unbeatable, and is the main obstacle to real playability.
+Note that a unit left idle will charge up its "attack" ability, followed by its "move" ability, meaning it can then do either instantly when necessary.
+
+Archers have 2 tiles of range, but reload much slower.
 
 ## Saves
 
@@ -79,9 +80,9 @@ Most commands, listed in order of importance. There's a couple weird internal on
 -   `/host` - Marks yourself as host, and clears anyone else who was previously host. "host" just means you automatically /sync to new players.
 -   `/team [team]...` - Changes which teams you can control the units of. You can specify multiple, but this doesn't "ally" those teams so far as the units are aware. Numbering starts from 0. This is also reset by `/seats`, which just assigns single teams to the players, in order.
 -   `/sync [name]...` - Sends the current log as you know it to the named players, who will replay it. You usually won't need to do this manually so long as someone is `/host`. Some notes here:
-  - If the new named players aren't starting from a fresh load, this will throw them off
-  - There's some weirdness under the hood to support this; it should be pretty robust, but if you try to `/sync` while there's already a `/sync` going on, you'll probably have a bad time.
-  - You know when the `/sync` is complete because the sender will automatically issue a `/callhash`.
+    - If the new named players aren't starting from a fresh load, this will throw them off
+    - There's some weirdness under the hood to support this; it should be pretty robust, but if you try to `/sync` while there's already a `/sync` going on, you'll probably have a bad time.
+    - You know when the `/sync` is complete because the sender will automatically issue a `/callhash`.
 - `/T [time]` - This is issued internally by the 'space' key, and says how many time units you're ready for the game to advance. Using this manually mostly just makes you a dick because nobody will know why that turn was 'short', with one exception - you can use `/T -1` to "unready" yourself. The default move is currently 360\*3 time units (3 swordsman moves) long.
 
 ### Editor commands
@@ -89,9 +90,10 @@ Most commands, listed in order of importance. There's a couple weird internal on
 These are intended for use for map editing. Technically they're available at any time, but using them during a game would be impolite.
 
 - Middle-click a tile to print its coordinates. This only shows in your output.
-- `/mk [type] [x] [y] [team]` - Creates an entity at the given location. Types:
+- `/mk [type] [x] [y] [team]` - Creates an entity at the given location. Units will not have any abilities charged. Types:
   - "grass" - a land space. Do not specify a team.
-  - "guy" - A regular fighter unit. Spawns without any cooldowns ready. Must specify a team 0-5.
+  - "S" - [Swordsfighter](https://qwantz.com/index.php?comic=2460)
+  - "A" - Archer
 - `/rm [x] [y]` - Removes everything at the given location.
 
 If you want to save it as a map, consider unzipping the log afterwards and cleaning up any accidental commands, e.g. removing and re-creating the same tile, to improve load speed. Remember, there's no magic around save games; it just replays the log.
