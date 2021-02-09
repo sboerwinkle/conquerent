@@ -29,6 +29,14 @@ import tasks, images
 from myhash import myhash
 import vector as vec
 
+# This has to happen first, even though most of main() we put at the end.
+# This lets Pygame figure out what pixel format the screen uses, which
+# has to be done before we load images (since we ask pygame to convert
+# them to the screen's format)
+if __name__ == "__main__":
+    pg.init()
+    screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+
 """entities"""
 class Entity:
     image = None
@@ -85,18 +93,17 @@ class SpunEntity(Entity):
         return (angle, super().customhash())
 
 class MovingIcon(SpunEntity):
-    pass
-images.queue_spun(MovingIcon, "icons", "move.png")
+    spun_images = images.load_spun("icons", "move.png")
 
 def set_team_skin(self, team):
     self.image = self.teamed_images[team]
 
 class Corpse(Entity):
     obstructs = True
+    teamed_images = images.load_teamed("units", "corpse.png")
     def __init__(self, pos, team):
         set_team_skin(self, team)
         super().__init__(pos)
-images.queue_teamed(Corpse, "units", "corpse.png")        
 
 team_bias_flips=[1,-1,1,-1,1,-1]
 team_bias_angles=[a for a in range(6)]
@@ -244,14 +251,15 @@ class MeleeActor(Actor):
         return ret
 
 class Guy(MeleeActor):
+    teamed_images = images.load_teamed("units", "guy2.png")
     def __init__(self, pos, team):
         set_team_skin(self, team)
         self.lap_time=360
         self.fight_windup_time=180
         super().__init__(pos, team)
-images.queue_teamed(Guy, "units", "guy2.png")
 
 class Archer(Actor):
+    teamed_images = images.load_teamed("units", "archer.png")
     def __init__(self, pos, team):
         set_team_skin(self, team)
         self.lap_time=360
@@ -280,7 +288,6 @@ class Archer(Actor):
         for v in range_2_vecs:
             ret.append(vec.add(self.pos, vec.transform(v, self.bias_flip, self.bias_angle)))
         return ret
-images.queue_teamed(Archer, "units", "archer.png")
 """end entities"""
 
 """symbols"""
@@ -295,11 +302,9 @@ class Symbol:
         dirty_tiles.add(self.pos)
     # Symbols are NOT hashed, they're part of local user HUD
 class SelectSymbol(Symbol):
-    pass
-images.queue(SelectSymbol, "icons", "select.png")
+    image = images.load("icons", "select.png")
 class TargetSymbol(Symbol):
-    pass
-images.queue(TargetSymbol, "icons", "target.png")
+    image = images.load("icons", "target.png")
 def clear_symbols():
     global symbols
     for s in symbols:
@@ -309,8 +314,7 @@ def clear_symbols():
 
 """tiles"""
 class TerrainGrass(Entity):
-    pass
-images.queue(TerrainGrass, "tiles", "grass.png")
+    image = images.load("tiles", "grass.png")
 
 """end tiles"""
 
@@ -793,10 +797,6 @@ def main():
     #   and I have no way of knowing how many lines I can read at that time.
 
     localname = sys.argv[1]
-    global screen
-    pg.init()
-    screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    images.load_queued()
 
     redraw()
     tasks.Keepalive()
