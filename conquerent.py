@@ -6,11 +6,16 @@ Much credit goes to the pygame maintainers for their wondeful, many-exampled lib
 """
 
 #Change this stuff as you desire
+
 SCREEN_WIDTH=550
 SCREEN_HEIGHT=480
 DELAY_FACTOR=3.0
+# How many lines to /sync at a time. This can probably get pretty high,
+# but shoddy netcode means that if it gets too high you might fill up a buffer or something.
+SYNC_MULTIPLE=5
 
 #Probably should not change this stuff
+
 TILE_WIDTH=50
 TILE_HEIGHT=43
 
@@ -737,6 +742,11 @@ def handle_net_command(who, command, line):
         out("> %s is now the /host" % who)
         host_mode = (who == localname)
         return False
+    if command == "dehost":
+        out("> %s has /dehost'ed" % who)
+        if who == localname:
+            host_mode = False
+        return False
     if command == "sync":
         out("> %s started /sync-ing to: %s" % (who, line))
         if who == localname:
@@ -853,17 +863,18 @@ def main():
         # If we're uploading, we write those lines out at 20Hz.
         # Yes, the whole "20Hz main loop" thing is dumb. You fix it then.
         if uploading:
-            #pg.time.wait(200) # Testing only, should be commented
-            line = logfile.readline()
-            if line:
-                server.send(b'#' + line)
-            else:
-                server.send(b'#:syncdone\n')
-                send('callhash\n')
-                uploading = False
-                logfile.close()
-                logfile = gzip.open(log_filename, 'ab')
-                resume_net_input()
+            for i in range(SYNC_MULTIPLE):
+                line = logfile.readline()
+                if line:
+                    server.send(b'#' + line)
+                else:
+                    server.send(b'#:syncdone\n')
+                    send('callhash\n')
+                    uploading = False
+                    logfile.close()
+                    logfile = gzip.open(log_filename, 'ab')
+                    resume_net_input()
+                    break
 
         # Read and process any lines waiting on the text inputs
         while True:

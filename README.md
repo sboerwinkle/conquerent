@@ -78,6 +78,7 @@ Most commands, listed in order of importance. There's a couple weird internal on
     Note that YOU MUST SET SEATS before anyone can control units.
 -   `/callhash` - All clients will print a short hash of the game state, good for checking consistency.
 -   `/host` - Marks yourself as host, and clears anyone else who was previously host. "host" just means you automatically /sync to new players.
+-   `/dehost` - Marks yourself as *not* host; no effect if you weren't host.
 -   `/team [team]...` - Changes which teams you can control the units of. You can specify multiple, but this doesn't "ally" those teams so far as the units are aware. Numbering starts from 0. This is also reset by `/seats`, which just assigns single teams to the players, in order.
 -   `/sync [name]...` - Sends the current log as you know it to the named players, who will replay it. You usually won't need to do this manually so long as someone is `/host`. Some notes here:
     - If the new named players aren't starting from a fresh load, this will throw them off
