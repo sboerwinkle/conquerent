@@ -17,6 +17,11 @@ def load_teamed(*segments):
     img = load(*segments)
     return [dye(img, c) for c in teamed_colors]
 
+def load_teamed_anim(name, frames):
+    teamed_anim = [load_teamed("units", name+str(x)+".png") for x in range(frames)]
+    # Transpose, so first index is team
+    return list(zip(*teamed_anim))
+
 def rotate(img, degrees):
     "A wrapper around pygame's rotate that rotates about the center and keeps the dimensions the same"
     dest = pg.Surface(img.get_size(), pg.SRCALPHA, img)

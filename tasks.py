@@ -51,15 +51,36 @@ class Move(Task):
     def run(self):
         """...eprint("Removing token")"""
         self.ent.move(self.pos)
-class Charge(Task):
-    def __init__(self, ent, cd_key):
-        self.cd_key = cd_key
+
+class DumbChargeTask(Task):
+    def __init__(self, ent, cd_key, amt, delay):
         self.ent = ent
-        super().__init__(ent.cooldowns[cd_key])
+        self.cd_key = cd_key
+        self.amt = amt
+        super().__init__(delay)
     def run(self):
-        self.ent.cooldowns[self.cd_key] = 0
+        self.ent.cooldowns[self.cd_key] = self.amt
+        self.ent.dirty()
+    def cancel(self):
+        if self.time == 0:
+            raise Exception("Not supposed to cancel a DumbChargeTask with zero time!")
+            # This shouldn't even be possible, but it means we'll probably miss marking the ent as dirty.
+        super().cancel()
+class Charge(DumbChargeTask):
+    def __init__(self, ent, cd_key, frame_times):
+        cd = ent.cooldowns[cd_key]
+        # Contract here is that nobody cancels my kids except me, so they'll always finish in reverse order,
+        # unless I cancel them first!
+        self.kids = [DumbChargeTask(ent, cd_key, t, cd - t) for t in frame_times if t < cd]
+        for k in self.kids:
+            k.onfinish(self.pop_kid)
+        super().__init__(ent, cd_key, 0, cd)
+    def pop_kid(self, kid):
+        self.kids.remove(kid)
     def cancel(self):
         self.ent.cooldowns[self.cd_key] = self.time
+        for k in self.kids:
+            k.cancel()
         super().cancel()
 class TokenResolver(Task):
     def __init__(self, actor, token):
@@ -107,13 +128,14 @@ class Lambda(Task):
 
 _pending=[]
 _immediates=[[]]
-running = False
+running = 0
 THINK_PATIENCE=1
 ACT_PATIENCE=2
+MAX_PATIENCE=3
 def schedule(task, time, patience=None):
+    "Some tasks will auto-schedule themselves on construction, but this is useful for the others."
     if patience != None:
         task.patience = patience
-    "Some tasks will auto-schedule themselves on construction, but this is good for the others."
     if time == 0:
         immediately(task.patience, task) # This makes sense right?
     else:
@@ -122,7 +144,7 @@ def schedule(task, time, patience=None):
 def immediately(patience, task):
     "add the task to the (patience)th immediate list."
     "If there aren't that many immediate lists yet, pad with empty lists."
-    if running:
+    if patience < running:
         while len(_immediates) <= patience:
             _immediates.append([])
         _immediates[patience].append(task)
@@ -137,15 +159,17 @@ def wait_time(time):
         raise Exception("Having a bad time")
     for t in _pending:
         t.time -= time
-def run():
+def run(patience = MAX_PATIENCE):
     global running
-    running = True
+    running = patience
     global _pending
     """...eprint("----------")"""
     others = []
     for t in _pending:
-        if t.time == 0:
+        if t.time == 0 and t.patience < running:
             immediately(t.patience, t)
+        elif t.time < 0:
+            raise Exception("Negative time on a task!")
         else:
             others.append(t)
     _pending = others
@@ -163,4 +187,4 @@ def run():
         while to_run:
             t = to_run.pop(0)
             t._run()
-    running = False
+    running = 0

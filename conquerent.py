@@ -55,12 +55,16 @@ class Entity:
 
     def move(self, pos):
         if self.pos != None:
+            self.dirty()
             get_tile(self.pos).rm(self)
-            dirty_tiles.add(self.pos)
         self.pos = pos
         if pos != None:
             get_tile(pos).add(self)
-            dirty_tiles.add(pos)
+            self.dirty()
+
+    def dirty(self):
+        if self.pos != None:
+            dirty_tiles.add(self.pos)
 
     def customhash(self):
         return (self.__class__.__name__, self.pos)
@@ -95,14 +99,17 @@ class SpunEntity(Entity):
 class MovingIcon(SpunEntity):
     spun_images = images.load_spun("icons", "move.png")
 
-def set_team_skin(self, team):
+def set_teamed_skin(self, team):
     self.image = self.teamed_images[team]
+def set_actor_skin(self, team):
+    self.body_frames = self.teamed_body_frames[team]
+    self.arm_frames = self.teamed_arm_frames[team]
 
 class Corpse(Entity):
     obstructs = True
     teamed_images = images.load_teamed("units", "corpse.png")
     def __init__(self, pos, team):
-        set_team_skin(self, team)
+        set_teamed_skin(self, team)
         super().__init__(pos)
 
 team_bias_flips=[1,-1,1,-1,1,-1]
@@ -112,7 +119,7 @@ team_bias_angles=[a for a in range(6)]
 cd_move="mv"
 cd_fight="atk"
 cd_recover="rcvr"
-# TODO What belongs to this class vs. Guy is a little vague,
+# TODO What belongs to this class vs. Sword is a little vague,
 #   should be move obvious where to draw the line when there are more units.
 class Actor(Entity):
     obstructs = True
@@ -123,9 +130,18 @@ class Actor(Entity):
         super().__init__(pos)
         self.ai = None
         self.tasks = []
-        " We want perfect symmetry, so in the future certain teams might be 'flipped' when it comes to left/right tie-breaking "
+        # Bias allows tie-breaking to be independent of absolute board orientation,
+        # meaning so long as any start position can be rotated and/or flipped to look
+        # like any other, the game can be made perfectly, completely fair.
+        # ... Assuming I don't have any bugs.
         self.bias_flip = team_bias_flips[team]
         self.bias_angle = team_bias_angles[team]
+
+    def draw(self, pos):
+        frame = int(0 == self.cooldowns[cd_move])
+        self._draw(pos, self.body_frames[frame])
+        frame = (self.fight_windup_time - self.cooldowns[cd_fight]) * 2 // self.fight_windup_time
+        self._draw(pos, self.arm_frames[frame])
 
     def move(self, pos):
         super().move(pos)
@@ -137,6 +153,7 @@ class Actor(Entity):
         self.dead = True
         if self.ai != None:
             self.ai.clear_watches()
+        # We don't cancel tasks, since some of them might be immediate by this point
 
     def die(self):
         corpse = Corpse(self.pos, self.team)
@@ -177,7 +194,13 @@ class Actor(Entity):
         # typically using a cooldown means we want the others to stop charging.
         if self.cooldowns[cd_key] == 0:
             return True
-        self.has_task(tasks.Charge(self, cd_key))
+
+        if cd_key == cd_fight:
+            frame_times = [self.fight_windup_time // 2]
+        else:
+            frame_times = []
+
+        self.has_task(tasks.Charge(self, cd_key, frame_times))
         return False
 
     def take_hit(self):
@@ -208,6 +231,7 @@ class Actor(Entity):
             return True
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = self.fight_windup_time
+        self.dirty()
         self.has_task(tasks.Hit(target))
         return True
     def should_target(self, target):
@@ -250,18 +274,20 @@ class MeleeActor(Actor):
             ret.append(vec.add(self.pos, vec.units[angle]))
         return ret
 
-class Guy(MeleeActor):
-    teamed_images = images.load_teamed("units", "guy2.png")
+class Sword(MeleeActor):
+    teamed_body_frames = images.load_teamed_anim("sword_body", 2)
+    teamed_arm_frames = images.load_teamed_anim("sword_arm", 3)
     def __init__(self, pos, team):
-        set_team_skin(self, team)
+        set_actor_skin(self, team)
         self.lap_time=360
         self.fight_windup_time=180
         super().__init__(pos, team)
 
 class Archer(Actor):
-    teamed_images = images.load_teamed("units", "archer.png")
+    teamed_body_frames = images.load_teamed_anim("archer_body", 2)
+    teamed_arm_frames = images.load_teamed_anim("archer_arm", 3)
     def __init__(self, pos, team):
-        set_team_skin(self, team)
+        set_actor_skin(self, team)
         self.lap_time=360
         self.fight_windup_time=360 + 180
         super().__init__(pos, team)
@@ -326,7 +352,9 @@ class Tile:
     def add(self, ent):
         self.contents.append(ent)
         if ent.visible:
-            for l in self.watchers:
+            # tile_update() typically cleans up watchers (while we're iterating it!),
+            # so we have to make a quick dupe w/ slice notation
+            for l in self.watchers[:]:
                 l.tile_update()
     def rm(self, ent):
         self.contents.remove(ent)
@@ -600,6 +628,8 @@ def do_step(requested_time):
         next_time = tasks.next_time()
     delay(requested_time)
     tasks.wait_time(requested_time)
+    tasks.run(tasks.THINK_PATIENCE)
+    redraw()
 
 selected = None
 def select(target):
@@ -665,7 +695,7 @@ def handle_net_command(who, command, line):
         what = args[0]
         unit=False
         if what == 'S':
-            f = Guy
+            f = Sword
             unit=True
         elif what == 'A':
             f = Archer
