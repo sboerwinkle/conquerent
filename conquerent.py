@@ -10,6 +10,7 @@ Much credit goes to the pygame maintainers for their wondeful, many-exampled lib
 SCREEN_WIDTH=550
 SCREEN_HEIGHT=480
 DELAY_FACTOR=3.0
+FONT_SIZE=24
 # How many lines to /sync at a time. This can probably get pretty high,
 # but shoddy netcode means that if it gets too high you might fill up a buffer or something.
 SYNC_MULTIPLE=5
@@ -23,6 +24,7 @@ import gzip
 import io
 import os
 import pygame as pg
+import pygame.freetype as freetype
 import shutil
 from select import select as fd_select
 import socket
@@ -41,6 +43,10 @@ import vector as vec
 if __name__ == "__main__":
     pg.init()
     screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+
+# TODO Maybe better font name, idk just guessing really
+font = freetype.SysFont("Courier", FONT_SIZE)
+font.fgcolor=(255,255,255,255)
 
 """entities"""
 class Entity:
@@ -151,7 +157,7 @@ class Actor(Entity):
     def move(self, pos):
         super().move(pos)
         self.cooldowns[cd_move] = self.lap_time
-        self.cooldowns[cd_fight] = self.fight_windup_time
+        self.cooldowns[cd_fight] = max(self.cooldowns[cd_fight], self.fight_windup_time // 2)
 
     def disintegrate(self):
         self.move(None)
@@ -407,12 +413,21 @@ def draw_tile(pos):
     for entity in board[x][y].contents:
         entity.draw(pos)
 
+team_badges = images.load_teamed("icons", "team.png")
+badge_margin = team_badges[0].get_width() // 2
+badge_spacing = team_badges[0].get_width() + badge_margin
+#Surface used to darken the screen before drawing the overlay
+overlay_bg = pg.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+overlay_bg.set_alpha(128)
+overlay_bg.fill(0)
+overlay_active = False
+
 screen_dirty = True
 dirty_tiles = set()
 def redraw():
     global screen_dirty
     global dirty_tiles
-    if screen_dirty:
+    if screen_dirty or overlay_active:
         screen_dirty = False
         screen.fill(0x000000)
         for x in range(0, len(board)):
@@ -425,6 +440,25 @@ def redraw():
     for s in symbols:
         # TODO This should be improved if possible to track dirtiness, like tiles
         s.draw()
+    if overlay_active:
+        screen.blit(overlay_bg, (0,0))
+        # Recomputing this each time is a little inefficient, but the overlay shouldn't be active all that much anyway.
+        rects = [font.get_rect(s.name) for s in seats]
+        max_width = max([r.x+r.width for r in rects]) if rects else 0
+        line_spacing = font.get_sized_height() + 20
+        for i in range(len(seats)):
+            font.render_to(screen, (20, 20+(i*line_spacing)), seats[i].name)
+            # font.render_to(screen, (40+max_width, 20+(i*line_spacing)), "X")
+    else:
+        # Only draw small badges if overlay isn't active.
+        # TODO: appropriately re-render if teams change.
+        y = badge_margin
+        for s in seats:
+            x = badge_margin
+            for t in s.team:
+                screen.blit(team_badges[t], (x,y))
+                x += badge_spacing
+            y += badge_spacing
     pg.display.update()
 """end rendering"""
 
@@ -820,6 +854,8 @@ def main():
     global localname
     global uploading
     global logfile
+    global overlay_active
+    global screen_dirty
 
     if (len(sys.argv) | 1) != 5: # hahahahahah
         eprint("Usage: %s name host port [save.gz]" % sys.argv[0])
@@ -921,6 +957,14 @@ def main():
             elif event.type == pg.KEYDOWN:
                 if event.key == pg.K_SPACE:
                     send("T " + str(360*3) + "\n")
+                if event.key == pg.K_TAB:
+                    overlay_active = True
+                    redraw()
+            elif event.type == pg.KEYUP:
+                if event.key == pg.K_TAB:
+                    overlay_active = False
+                    screen_dirty = True
+                    redraw()
     send("raw > %s has left\n" % localname)
     logfile.close()
     server.close()
