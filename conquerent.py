@@ -125,6 +125,7 @@ class Corpse(Entity):
 
 team_bias_flips=[1,-1,1,-1,1,-1]
 team_bias_angles=[a for a in range(6)]
+unit_counts = [0]*6
 
 # Cooldown keys. We use short strings b/c it looks legit
 cd_move="mv"
@@ -155,6 +156,10 @@ class Actor(Entity):
         self._draw(pos, self.arm_frames[frame])
 
     def move(self, pos):
+        if self.pos == None:
+            unit_counts[self.team] += 1
+        if pos == None:
+            unit_counts[self.team] -= 1
         super().move(pos)
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = max(self.cooldowns[cd_fight], self.fight_windup_time // 2)
@@ -220,20 +225,34 @@ class Actor(Entity):
     def should_navigate(self, pos):
         delta = vec.add(pos, vec.mult(self.pos, -1))
         angles = vec.calc_angles(delta, self.bias_flip)
-        for angle in angles:
-            if self.try_move(angle):
-                return True
-        return False
-    def try_move(self, angle):
         # Charge first before checking destinations;
-        # some obstructions are temporary, and we don't want to report a failure
+        # some obstructions (notably move claim tokens) are temporary, and we don't want to report a failure
         # until we're actually ready to move and the obstacle is still there.
         if not self.charge(cd_move):
-            self.bias_angle = angle
+            self.bias_angle = angles[0]
             return True
+
+        watchables = []
+        for angle in angles:
+            ret = self.try_move(angle)
+            if ret == True:
+                return True
+            else:
+                watchables += ret
+        if watchables:
+            for w in watchables:
+                self.ai.watch(w)
+            return True
+        return False
+    def try_move(self, angle):
         dest = vec.add(self.pos, vec.units[angle])
-        if not is_walkable(get_tile(dest)):
-            return False
+        tile = get_tile(dest)
+        if not is_walkable(tile):
+            if is_walkable_later(tile):
+                # watch it if there's no other good options
+                return [dest]
+            # Else, no ideas to try.
+            return []
         self.has_task(tasks.TokenResolver(self, MoveClaimToken(dest)))
         self.bias_angle = angle
         return True
@@ -401,6 +420,17 @@ def is_walkable(tile):
         if e.obstructs:
             return False
     return True
+def is_walkable_later(tile):
+    ents = tile.contents
+    if not ents:
+        return False
+    for e in ents:
+        # Actors and corpses might move later, but other things probably won't.
+        # At the moment, "other things" is just MoveClaimTokens, which always disappear after a turn;
+        # there's no fair way to have AIs watch those while still completing a turn, so they give up instead.
+        if e.obstructs and not (isinstance(e, Actor) or isinstance(e, Corpse)):
+            return False
+    return True
 """end board"""
 
 """rendering"""
@@ -413,9 +443,11 @@ def draw_tile(pos):
     for entity in board[x][y].contents:
         entity.draw(pos)
 
-team_badges = images.load_teamed("icons", "team.png")
-badge_margin = team_badges[0].get_width() // 2
-badge_spacing = team_badges[0].get_width() + badge_margin
+ready_badges = images.load_teamed("icons", "team_ready.png")
+waiting_badges = images.load_teamed("icons", "team_waiting.png")
+dead_badges = images.load_teamed("icons", "team_skull_1.png")
+badge_margin = ready_badges[0].get_width() // 2
+badge_spacing = ready_badges[0].get_width() + badge_margin*2
 #Surface used to darken the screen before drawing the overlay
 overlay_bg = pg.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 overlay_bg.set_alpha(128)
@@ -445,20 +477,19 @@ def redraw():
         # Recomputing this each time is a little inefficient, but the overlay shouldn't be active all that much anyway.
         rects = [font.get_rect(s.name) for s in seats]
         max_width = max([r.x+r.width for r in rects]) if rects else 0
-        line_spacing = font.get_sized_height() + 20
         for i in range(len(seats)):
-            font.render_to(screen, (20, 20+(i*line_spacing)), seats[i].name)
-            # font.render_to(screen, (40+max_width, 20+(i*line_spacing)), "X")
-    else:
-        # Only draw small badges if overlay isn't active.
-        # TODO: appropriately re-render if teams change.
-        y = badge_margin
-        for s in seats:
-            x = badge_margin
-            for t in s.team:
-                screen.blit(team_badges[t], (x,y))
-                x += badge_spacing
-            y += badge_spacing
+            font.render_to(screen, (badge_spacing, badge_margin + badge_spacing*i), seats[i].name)
+
+    # Always draw badges
+    for i in range(len(seats)):
+        s = seats[i]
+        if unit_counts[s.team] == 0:
+            sheet = dead_badges
+        elif s.time == -1:
+            sheet = waiting_badges
+        else:
+            sheet = ready_badges
+        screen.blit(sheet[s.team], (badge_margin, badge_margin + badge_spacing*i))
     pg.display.update()
 """end rendering"""
 
@@ -564,7 +595,7 @@ def mouse_to_tile(x, y):
 
 def get_selectable(pos, team):
     for x in get_tile(pos).contents:
-        if isinstance(x, Actor) and x.team in team:
+        if isinstance(x, Actor) and x.team == team:
             return x
 def send_tile_command(ent, pos, append):
     ai = ent.ai
@@ -587,7 +618,7 @@ def get_team():
     for s in seats:
         if s.name == localname:
             return s.team
-    return []
+    return -1
 """end seats"""
 
 """main stuff"""
@@ -712,6 +743,7 @@ def handle_net_command(who, command, line):
     global downloading
     global fast_forward
     global host_mode
+    global screen_dirty
     " Returns False if the command had no impact on gamestate "
     args = line.split(' ')
     # Some commands don't require you to be seated
@@ -722,8 +754,10 @@ def handle_net_command(who, command, line):
         out(line)
         return False
     if command == "seats":
-        seats[:] = [Seat(args[i], [i]) for i in range(len(args))]
+        seats[:] = [Seat(args[i], i) for i in range(len(args))]
         out("> %s set the /seats to: %s" % (who, line))
+        screen_dirty = True
+        redraw()
         return
     if command == "callhash":
         out("> %s issued /callhash" % who)
@@ -763,7 +797,6 @@ def handle_net_command(who, command, line):
                 ent.move(None)
         # Have to redraw the whole screen, since there's nothing left on that tile
         # to cover up the previous pixels there
-        global screen_dirty
         screen_dirty = True
         redraw()
         return
@@ -812,19 +845,19 @@ def handle_net_command(who, command, line):
 
     if command == "T":
         seat.time = int(line)
-        ready_seats = []
-        waiting_seats = []
-        for s in seats:
-            (waiting_seats if s.time < 0 else ready_seats).append(s.name)
-        if len(waiting_seats) > 0:
-            out("> %s confirmed, waiting on %s" % (str(ready_seats), str(waiting_seats)))
+        try:
+            requested_time = min(s.time for s in seats if unit_counts[s.team] != 0)
+        except ValueError:
+            # All seated teams are dead, nothing to do.
+            requested_time = -1
+        if (requested_time < 0):
+            redraw()
             return
-        requested_time = min(s.time for s in seats)
-        out("------------------------------")
-        for s in seats:
-            s.time = -1
         select(None)
         do_step(requested_time)
+        for s in seats:
+            s.time = -1
+        redraw()
         return
     if command == "do":
         args = [int(a) for a in args]
@@ -839,8 +872,9 @@ def handle_net_command(who, command, line):
                 select(subject)
         return
     if command == "team":
-        seat.team = [int(arg) for arg in args]
-        out("> %s set their team to %s" % (who, str(seat.team)))
+        seat.team = int(args[0])
+        seat.time = -1
+        redraw()
         return
     out("> %s issued unknown command %s" % (who, command))
     return False
@@ -955,11 +989,18 @@ def main():
                 elif event.button == 2:
                     out("(" + str(tile) + ")")
             elif event.type == pg.KEYDOWN:
-                if event.key == pg.K_SPACE:
+                key = event.key
+                if key == pg.K_SPACE:
                     send("T " + str(360*3) + "\n")
-                if event.key == pg.K_TAB:
+                if key == pg.K_TAB:
                     overlay_active = True
                     redraw()
+                if key >= pg.K_1 and key <= pg.K_6:
+                    if overlay_active:
+                        send("team %d\n" % (event.key - pg.K_1))
+                if key >= pg.K_KP_1 and key <= pg.K_KP_6:
+                    if overlay_active:
+                        send("team %d\n" % (event.key - pg.K_KP_1))
             elif event.type == pg.KEYUP:
                 if event.key == pg.K_TAB:
                     overlay_active = False

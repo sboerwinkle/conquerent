@@ -19,6 +19,7 @@ Done
 Important
 =========
 - mini "teams + readiness" indicator, to replace "/team" and console spam
+	- Update README accordingly
 - Only seats with an living team need to ready
 - Tab to show seats + allow team changing
 - Swords have extra health?
