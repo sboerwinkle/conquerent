@@ -49,6 +49,8 @@ Shift + right-click to queue a move command.
 
 Space to acknowledge the end of your turn.
 
+Tab shows player names; press 1-6 while this is active to set your team.
+
 ## Mechanics
 
 A "turn" is just a chunk of time during which units are allowed to operate, before the game pauses once again for new commands.
@@ -70,7 +72,7 @@ A save can be loaded by specifying the path to it as the 4th arg (after port). T
 
 ## Commands
 
-Most commands, listed in order of importance. There's a couple weird internal ones I omit for simplicity.
+Most commands, listed in order of importance. There's a couple internal ones I omit for simplicity.
 -   `/seats [name]...` sets the seats. This is more-or-less the teams, and determines which units you can control and who has to acknowledge before the turn continues.
 
     If, for instance, joe and sue are playing, enter `/seats joe sue`.
@@ -79,7 +81,6 @@ Most commands, listed in order of importance. There's a couple weird internal on
 -   `/callhash` - All clients will print a short hash of the game state, good for checking consistency.
 -   `/host` - Marks yourself as host, and clears anyone else who was previously host. "host" just means you automatically /sync to new players.
 -   `/dehost` - Marks yourself as *not* host; no effect if you weren't host.
--   `/team [team]...` - Changes which teams you can control the units of. You can specify multiple, but this doesn't "ally" those teams so far as the units are aware. Numbering starts from 0. This is also reset by `/seats`, which just assigns single teams to the players, in order.
 -   `/sync [name]...` - Sends the current log as you know it to the named players, who will replay it. You usually won't need to do this manually so long as someone is `/host`. Some notes here:
     - If the new named players aren't starting from a fresh load, this will throw them off
     - There's some weirdness under the hood to support this; it should be pretty robust, but if you try to `/sync` while there's already a `/sync` going on, you'll probably have a bad time.

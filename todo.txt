@@ -15,18 +15,18 @@ Done
 / Directional and handed-ness biases per team
 / More sprite states to indicate "fight charged", "move charged", etc
 / Attack windup greater after attack
+/ Tab to show seats + allow team changing
+/ Only seats with an living team need to ready
+/ mini "teams + readiness" indicator, to replace "/team" and console spam
+	/ Update README accordingly
+/ improved pathing
+	/ Pick direction more intelligently when there's bias to be had
+	/ When blocked, use tile watchers to resume when there's a path
+		! Disputed spaces will still abort pathing if there's no other options
 
 Important
 =========
-- mini "teams + readiness" indicator, to replace "/team" and console spam
-	- Update README accordingly
-- Only seats with an living team need to ready
-- Tab to show seats + allow team changing
 - Swords have extra health?
-- improved pathing
-	/ Pick direction more intelligently when there's bias to be had
-	- When blocked, use tile watchers to resume when there's a path
-		This may be more complex if the issue is a disputed space, not an occupied space.
 - More unit types: swordsman / archer / berserker / troll
 	/ Swordsman:
 		Base, what we have now.
@@ -41,7 +41,7 @@ Important
 	- Berserker:
 		Deals 2 damage per hit
 		Delay between "being killed" and dying, exactly long enough for one more attack
-	The general idea is Trolls > Archers > Berserkers > Trolls, with Swordsman being a cheap shitty unit.
+	The general idea is Trolls > Archers > Berserkers > Trolls (rock/paper/scissors), with Swordsman being a cheap shitty unit.
 	Berserkers are also offensively biased, while Archers are defensively biased
 - More command options
 	Biggest concern here is with how to manage the unexpected over the next turn.
