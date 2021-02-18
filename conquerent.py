@@ -41,7 +41,8 @@ import vector as vec
 # has to be done before we load images (since we ask pygame to convert
 # them to the screen's format)
 if __name__ == "__main__":
-    pg.init()
+    pg.display.init()
+    pg.freetype.init()
     screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
 # TODO Maybe better font name, idk just guessing really
