@@ -41,6 +41,8 @@ Chat is entered via the console (the terminal window where you launched the game
 
 ## Controls
 
+Click and drag to look around.
+
 Left-click a unit to select it.
 
 Right-click a unit to have it move towards a space. Units are pretty dumb.

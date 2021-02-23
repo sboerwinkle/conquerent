@@ -11,6 +11,8 @@ SCREEN_WIDTH=550
 SCREEN_HEIGHT=480
 DELAY_FACTOR=3.0
 FONT_SIZE=24
+DRAG_START_MILLIS=150
+DRAG_START_PX=15
 # How many lines to /sync at a time. This can probably get pretty high,
 # but shoddy netcode means that if it gets too high you might fill up a buffer or something.
 SYNC_MULTIPLE=5
@@ -224,7 +226,7 @@ class Actor(Entity):
         self.has_task(tasks.Die(self))
 
     def should_navigate(self, pos):
-        delta = vec.add(pos, vec.mult(self.pos, -1))
+        delta = vec.sub(pos, self.pos)
         angles = vec.calc_angles(delta, self.bias_flip)
         # Charge first before checking destinations;
         # some obstructions (notably move claim tokens) are temporary, and we don't want to report a failure
@@ -382,15 +384,15 @@ class Tile:
         self.watchers = []
     def add(self, ent):
         self.contents.append(ent)
+        self.handle_activity(ent)
+    def rm(self, ent):
+        self.contents.remove(ent)
+        self.handle_activity(ent)
+    def handle_activity(self, ent):
         if ent.visible:
             # tile_update() typically cleans up watchers (while we're iterating it!),
             # so we have to make a quick dupe w/ slice notation
             for l in self.watchers[:]:
-                l.tile_update()
-    def rm(self, ent):
-        self.contents.remove(ent)
-        if ent.visible:
-            for l in self.watchers:
                 l.tile_update()
     def customhash(self):
         return (self.contents, len(self.watchers))
@@ -891,6 +893,8 @@ def main():
     global logfile
     global overlay_active
     global screen_dirty
+    global screen_offset_x
+    global screen_offset_y
 
     if (len(sys.argv) | 1) != 5: # hahahahahah
         eprint("Usage: %s name host port [save.gz]" % sys.argv[0])
@@ -926,6 +930,10 @@ def main():
     send('host\n' if host_hint else 'join\n')
     out("Starting main loop")
 
+    drag_start_ticks = 0
+    drag_start_pos = (0,0)
+    drag_start_view = (0,0)
+    drag_stage = 0
     running = True
     while running:
         # Rather than spin up two threads (ugh) we just poll both event sources at 20 Hz
@@ -982,6 +990,10 @@ def main():
             elif event.type == pg.MOUSEBUTTONDOWN:
                 tile = mouse_to_tile(*pg.mouse.get_pos())
                 if event.button == 1:
+                    drag_start_ticks = pg.time.get_ticks()
+                    drag_start_pos = pg.mouse.get_pos()
+                    drag_start_view = (screen_offset_x, screen_offset_y)
+                    drag_stage = 1
                     select(get_selectable(tile, get_team()))
                 elif event.button == 3:
                     if selected != None:
@@ -989,6 +1001,21 @@ def main():
                         send("do %d %d %d %d%s\n" % (selected[0], selected[1], tile[0], tile[1], modifier))
                 elif event.button == 2:
                     out("(" + str(tile) + ")")
+            elif event.type == pg.MOUSEBUTTONUP:
+                if event.button == 1:
+                    drag_stage = 0
+            elif event.type == pg.MOUSEMOTION:
+                if drag_stage > 0:
+                    offset = vec.sub(pg.mouse.get_pos(), drag_start_pos)
+                    if drag_stage == 1:
+                        if pg.time.get_ticks() - drag_start_ticks >= DRAG_START_MILLIS:
+                            drag_stage = 2
+                        elif offset[0] ** 2 + offset[1] ** 2 >= DRAG_START_PX ** 2:
+                            drag_stage = 2
+                    if drag_stage == 2:
+                        (screen_offset_x, screen_offset_y) = vec.add(drag_start_view, offset)
+                        screen_dirty = True
+                        redraw()
             elif event.type == pg.KEYDOWN:
                 key = event.key
                 if key == pg.K_SPACE:

@@ -55,6 +55,8 @@ Important
 		Maybe you can "additional target" a space to defend it?
 	Better command indication - shade all target move cells / attack cells appropriately
 - Larger, scrollable map
+	- Larger map
+	/ Scrollable map
 - Capture / summon system
 	For now, this will probably consist of "keeps" and "farms", both of which are unwalkable.
 	"Move into" a keep or farm to capture it, consuming the unit (Cheap swordsman ideal here)
