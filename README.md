@@ -88,6 +88,7 @@ Most commands, listed in order of importance. There's a couple internal ones I o
     - There's some weirdness under the hood to support this; it should be pretty robust, but if you try to `/sync` while there's already a `/sync` going on, you'll probably have a bad time.
     - You know when the `/sync` is complete because the sender will automatically issue a `/callhash`.
 - `/T [time]` - This is issued internally by the 'space' key, and says how many time units you're ready for the game to advance. Using this manually mostly just makes you a dick because nobody will know why that turn was 'short', with one exception - you can use `/T -1` to "unready" yourself. The default move is currently 360\*3 time units (3 swordsman moves) long.
+- `/alliance <team> <allianceCode>` - Sets the specified team alliance code. Teams which have bitwise-and alliance codes not equal to 0 will not attack each other. Default alliance codes are 1<<(team).
 
 ### Editor commands
 

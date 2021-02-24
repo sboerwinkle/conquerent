@@ -128,6 +128,8 @@ class Corpse(Entity):
 
 team_bias_flips=[1,-1,1,-1,1,-1]
 team_bias_angles=[a for a in range(6)]
+#starting alliance bitmaps are powers of two. Cease-fires are for teams that have non-zero bitwise AND. Resource sharing should be implemented only among matching team_alliance values.
+team_alliance = [1<<a for a in range(6)]
 unit_counts = [0]*6
 
 # Cooldown keys. We use short strings b/c it looks legit
@@ -290,7 +292,7 @@ class Actor(Entity):
 
     def choose_target(self, loc):
         for x in get_tile(loc).contents:
-            if isinstance(x, Actor) and x.team != self.team:
+            if isinstance(x, Actor) and (team_alliance[x.team] & team_alliance[self.team]) == 0:
                 return x
         return None
     def is_loc_in_range(self, loc):
@@ -480,8 +482,20 @@ def redraw():
         # Recomputing this each time is a little inefficient, but the overlay shouldn't be active all that much anyway.
         rects = [font.get_rect(s.name) for s in seats]
         max_width = max([r.x+r.width for r in rects]) if rects else 0
+        for localseat in seats:
+            if localseat.name == localname:
+                localteam = localseat.team
+                break
         for i in range(len(seats)):
-            font.render_to(screen, (badge_spacing, badge_margin + badge_spacing*i), seats[i].name)
+            displayName = seats[i].name
+            if localteam == i:
+                displayName += " (ME)"
+            elif (team_alliance[i] & team_alliance[localteam]) != 0:
+                if team_alliance[i] == team_alliance[localteam]:
+                    displayName += " (BUDDY)"
+                else:
+                    displayName += " (CEASEFIRE)"
+            font.render_to(screen, (badge_spacing, badge_margin + badge_spacing*i), displayName)
 
     # Always draw badges
     for i in range(len(seats)):
@@ -837,6 +851,20 @@ def handle_net_command(who, command, line):
         downloading = False
         fast_forward = False
         resume_net_input()
+        return False
+    if command == "alliance":
+        affectedTeam = int(args[0])
+        newCode = int(args[1])
+        oldCode = team_alliance[affectedTeam]
+        team_alliance[affectedTeam] = newCode
+        #Handle idle people standing next to new enemies.
+        for brow in board:
+            for tile in brow:
+                for content in tile.contents:
+                    #we are an ai'd actor who is on a team affected by this change
+                    if isinstance(content, Actor) and content.ai != None and (content.team == affectedTeam or (((team_alliance[content.team] & newCode) == 0) != ((team_alliance[content.team] & oldCode) == 0))):
+                        content.ai.queue_immediately()
+        out("> %s set team %d to alliance code %d" % (who, int(args[0]), int(args[1])))
         return False
 
     for seat in seats:
