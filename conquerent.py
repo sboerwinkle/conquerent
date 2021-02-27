@@ -223,7 +223,11 @@ class Actor(Entity):
         return False
 
     def take_hit(self):
-        self.has_task(tasks.Die(self))
+        # No reason to has_task() this; it shouldn't affect what we do,
+        # and besides it'll probably happen too soon to matter anyway.
+        tasks.Die(self)
+    def fight(self, target):
+        self.has_task(tasks.Hit(target))
 
     def should_navigate(self, pos):
         delta = vec.sub(pos, self.pos)
@@ -265,7 +269,7 @@ class Actor(Entity):
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = self.fight_windup_time
         self.dirty()
-        self.has_task(tasks.Hit(target))
+        self.fight(target)
         return True
     def should_target(self, target):
         if self.is_loc_in_range(target.pos):
@@ -316,13 +320,79 @@ class Sword(MeleeActor):
         self.fight_windup_time=180
         super().__init__(pos, team)
 
+class Berserk(MeleeActor):
+    teamed_body_frames = images.load_teamed_anim("berserk_body", 2)
+    teamed_arm_frames = images.load_teamed_anim("berserk_arm", 3)
+    def __init__(self, pos, team):
+        set_actor_skin(self, team)
+        # 80% of base cooldown times
+        self.lap_time=288
+        self.fight_windup_time=144
+        self.dying = False
+        super().__init__(pos, team)
+    def fight(self, target):
+        self.has_task(tasks.Hit(target))
+        self.has_task(tasks.Hit(target))
+    def take_hit(self):
+        if self.dying:
+            return
+        self.dying = True
+        tasks.Die(self, self.fight_windup_time, tasks.ACT_PATIENCE)
+
+class Golem(MeleeActor):
+    teamed_torso_frames = images.load_teamed_anim("golem_torso", 2)
+    teamed_arm_frames = images.load_teamed_anim("golem_arm", 3)
+    teamed_toes = images.load_teamed("units", "golem_toes.png")
+    def __init__(self, pos, team):
+        self.torso_frames = self.teamed_torso_frames[team]
+        self.arm_frames = self.teamed_arm_frames[team]
+        self.toes = self.teamed_toes[team]
+        self.lap_time=450 # Base x1.25
+        self.fight_windup_time=180
+        self.recover_time=360+180 # Exactly archer reload speed
+        self.wounded = False
+        super().__init__(pos, team)
+    def draw(self, pos):
+        # Might make this the standard drawing function at some pt
+        frame = int(not self.wounded)
+        self._draw(pos, self.torso_frames[frame])
+        if 0 == self.cooldowns[cd_move]:
+            self._draw(pos, self.toes)
+        frame = (self.fight_windup_time - self.cooldowns[cd_fight]) * 2 // self.fight_windup_time
+        self._draw(pos, self.arm_frames[frame])
+    def should_chill(self):
+        if self.wounded:
+            if not self.charge(cd_recover):
+                return True
+            # Most other things happen in a custom task, but heck,
+            # it's not like this is racing any other conditions
+            # or needs to be exclusive with anything else
+            self.wounded = False
+            self.dirty()
+            self.cooldowns[cd_recover] = self.recover_time
+        self.charge(cd_fight) and self.charge(cd_move)
+        return True
+    def take_hit(self):
+        if self.wounded:
+            tasks.Die(self)
+        else:
+            self.dirty()
+            self.wounded = True
+            self.ai.queue_immediately()
+    def move(self, pos):
+        super().move(pos)
+        self.cooldowns[cd_recover] = self.recover_time
+    def fight(self, target):
+        super().fight(target)
+        self.cooldowns[cd_recover] = self.recover_time
+
 class Archer(Actor):
     teamed_body_frames = images.load_teamed_anim("archer_body", 2)
     teamed_arm_frames = images.load_teamed_anim("archer_arm", 3)
     def __init__(self, pos, team):
         set_actor_skin(self, team)
         self.lap_time=360
-        self.fight_windup_time=360 + 180
+        self.fight_windup_time=360+180 # Exactly Golem regen speed
         super().__init__(pos, team)
     def get_locs_in_range(self):
         ret = []
@@ -405,7 +475,7 @@ invalid_tile.rm = complain
 screen_offset_x = -TILE_WIDTH*5//2
 screen_offset_y = 0
 
-board = [[Tile([]) for i in range(11)] for j in range(11)]
+board = [[Tile([]) for i in range(15)] for j in range(15)]
 
 def get_tile(pos):
     (x, y) = pos
@@ -770,11 +840,17 @@ def handle_net_command(who, command, line):
     if command == "mk":
         what = args[0]
         unit=False
-        if what == 'S':
+        if what == "S":
             f = Sword
             unit=True
-        elif what == 'A':
+        elif what == "A":
             f = Archer
+            unit=True
+        elif what == "B":
+            f = Berserk
+            unit=True
+        elif what == "G":
+            f = Golem
             unit=True
         elif what == 'grass':
             f = TerrainGrass
@@ -802,6 +878,18 @@ def handle_net_command(who, command, line):
         # to cover up the previous pixels there
         screen_dirty = True
         redraw()
+        return
+    if command == "bias":
+        # Sets a team's directional / handedness biases.
+        # Useful during mapmaking to balance things, but it doesn't apply to already-placed units.
+        team = int(args[0])
+        angle = int(args[1])
+        flip = int(args[2])
+        if angle < 0 or angle >= 6 or abs(flip) != 1 or team < 0 or team >= len(team_bias_angles):
+            out("Bad \"bias\" command from " + who)
+        else:
+            team_bias_angles[team] = angle
+            team_bias_flips[team] = flip
         return
     if command == "join":
         out("> %s has joined" % who)

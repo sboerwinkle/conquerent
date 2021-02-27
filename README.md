@@ -61,6 +61,10 @@ Note that a unit left idle will charge up its "attack" ability, followed by its 
 
 Archers have 2 tiles of range, but reload much slower.
 
+Golems have 2 health, and will heal if they have nothing else to do.
+
+Berserkers are quite dangerous; they move and attack slightly faster, can kill a Golem in one hit, and can push through a fatal wound long enough for one more hit. A well-placed Archer will still make short work of a Berserker, though.
+
 ## Saves
 
 The game records all commands (except chat, and some other unimportant stuff) in a log. This also serves as the save system, since logs can be replayed.

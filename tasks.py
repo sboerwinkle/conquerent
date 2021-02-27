@@ -111,10 +111,10 @@ class Hit(Task):
     def run(self):
         self.target.take_hit()
 class Die(Task):
-    def __init__(self, actor):
+    def __init__(self, actor, time=0, patience=0):
         super().__init__()
-        # Only reason this isn't just a method is because there are other concurrent actions that might want to go through, like moving
-        immediately(0, self)
+        # Even if time is 0, there are other concurrent actions that might want to go through, like hitting back
+        schedule(self, time, patience)
         self.actor = actor
     def run(self):
         self.actor.die()

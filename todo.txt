@@ -23,26 +23,12 @@ Done
 	/ Pick direction more intelligently when there's bias to be had
 	/ When blocked, use tile watchers to resume when there's a path
 		! Disputed spaces will still abort pathing if there's no other options
+/ More unit types: swordsman / archer / berserker / troll
+/ Larger, scrollable map
 
 Important
 =========
 - Swords have extra health?
-- More unit types: swordsman / archer / berserker / troll
-	/ Swordsman:
-		Base, what we have now.
-	/ Archer:
-		2 tile range
-		Much lower rate of fire
-	- Troll:
-		2 health
-		Regenerates, faster than the archer rate of fire
-		Not sure yet if regeneration is higher priority than obeying commands
-		Might move slower than base
-	- Berserker:
-		Deals 2 damage per hit
-		Delay between "being killed" and dying, exactly long enough for one more attack
-	The general idea is Trolls > Archers > Berserkers > Trolls (rock/paper/scissors), with Swordsman being a cheap shitty unit.
-	Berserkers are also offensively biased, while Archers are defensively biased
 - More command options
 	Biggest concern here is with how to manage the unexpected over the next turn.
 	At the moment, queueing commands is actually not a priority.
@@ -54,15 +40,14 @@ Important
 		In exclusive mode, these are the only things that will be auto-attacked.
 		Maybe you can "additional target" a space to defend it?
 	Better command indication - shade all target move cells / attack cells appropriately
-- Larger, scrollable map
-	- Larger map
-	/ Scrollable map
 - Capture / summon system
 	For now, this will probably consist of "keeps" and "farms", both of which are unwalkable.
 	"Move into" a keep or farm to capture it, consuming the unit (Cheap swordsman ideal here)
 	Farms give points to the controlling team; one "point" per complete turn held, but track it granularly
 	Keeps allow summoning units adjacent to them, for cost (and with cooldown)
 - Use new centralized redraw() as a way to suspend drawing while in fast-forward
+- Board size should be configurable, or better yet dynamic.
+- As board size increases, it would be nice to render only part of it.
 
 Not Important
 =============
