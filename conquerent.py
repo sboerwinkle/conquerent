@@ -757,11 +757,11 @@ def handle_net_bytes(orig_bytes, do_log = True):
         logfile.write(orig_bytes)
 
 def handle_net_command(who, command, line):
+    "Returns False if the command had no impact on gamestate"
     global downloading
     global fast_forward
     global host_mode
     global screen_dirty
-    " Returns False if the command had no impact on gamestate "
     args = line.split(' ')
     # Some commands don't require you to be seated
     if command == "say":
@@ -857,15 +857,21 @@ def handle_net_command(who, command, line):
         newCode = int(args[1])
         oldCode = team_alliance[affectedTeam]
         team_alliance[affectedTeam] = newCode
+        affected = [
+                ((team_alliance[t] & oldCode) == 0)
+                != ((team_alliance[t] & newCode) == 0)
+                for t in range(len(team_alliance))
+        ]
+        affected[affectedTeam] = True
         #Handle idle people standing next to new enemies.
         for brow in board:
             for tile in brow:
                 for content in tile.contents:
                     #we are an ai'd actor who is on a team affected by this change
-                    if isinstance(content, Actor) and content.ai != None and (content.team == affectedTeam or (((team_alliance[content.team] & newCode) == 0) != ((team_alliance[content.team] & oldCode) == 0))):
+                    if isinstance(content, Actor) and content.ai != None and affected[content.team]:
                         content.ai.queue_immediately()
         out("> %s set team %d to alliance code %d" % (who, int(args[0]), int(args[1])))
-        return False
+        return
 
     for seat in seats:
         if seat.name == who:

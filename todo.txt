@@ -63,6 +63,12 @@ Important
 	Farms give points to the controlling team; one "point" per complete turn held, but track it granularly
 	Keeps allow summoning units adjacent to them, for cost (and with cooldown)
 - Use new centralized redraw() as a way to suspend drawing while in fast-forward
+- More intuitive alliance controls
+	Pull affected team from who issued the command
+	Something in the tab overlay might be nice
+	At the very least, remove the need for bitwise-math in your head
+- Alliances must be mutual?
+	If this is done, breaking an alliance should un-ready at least the involved parties
 
 Not Important
 =============
