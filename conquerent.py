@@ -482,19 +482,23 @@ def redraw():
         # Recomputing this each time is a little inefficient, but the overlay shouldn't be active all that much anyway.
         rects = [font.get_rect(s.name) for s in seats]
         max_width = max([r.x+r.width for r in rects]) if rects else 0
+
+        localteam = None
         for localseat in seats:
             if localseat.name == localname:
                 localteam = localseat.team
                 break
+
         for i in range(len(seats)):
             displayName = seats[i].name
-            if localteam == i:
-                displayName += " (ME)"
-            elif (team_alliance[i] & team_alliance[localteam]) != 0:
-                if team_alliance[i] == team_alliance[localteam]:
-                    displayName += " (BUDDY)"
-                else:
-                    displayName += " (CEASEFIRE)"
+            if localteam != None:
+                if localteam == i:
+                    displayName += " (ME)"
+                elif (team_alliance[i] & team_alliance[localteam]) != 0:
+                    if team_alliance[i] == team_alliance[localteam]:
+                        displayName += " (BUDDY)"
+                    else:
+                        displayName += " (CEASEFIRE)"
             font.render_to(screen, (badge_spacing, badge_margin + badge_spacing*i), displayName)
 
     # Always draw badges
