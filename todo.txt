@@ -48,6 +48,12 @@ Important
 - Use new centralized redraw() as a way to suspend drawing while in fast-forward
 - Board size should be configurable, or better yet dynamic.
 - As board size increases, it would be nice to render only part of it.
+- More intuitive alliance controls
+	Pull affected team from who issued the command
+	Something in the tab overlay might be nice
+	At the very least, remove the need for bitwise-math in your head
+- Alliances must be mutual?
+	If this is done, breaking an alliance should un-ready at least the involved parties
 
 Not Important
 =============
