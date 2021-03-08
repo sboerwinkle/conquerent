@@ -73,7 +73,7 @@ class Entity:
             get_tile(self.pos).rm(self)
         self.pos = pos
         if pos != None:
-            get_tile(pos).add(self)
+            require_tile(pos).add(self)
             self.dirty()
 
     def dirty(self):
@@ -86,10 +86,6 @@ class Entity:
 class MoveClaimToken(Entity):
     valid = True
     visible = False
-    def __init__(self, pos):
-        super().__init__(pos)
-        """...eprint("Token created")"""
-        " TODO delete __init__ "
     def move(self, pos):
         super().move(pos)
         if pos == None:
@@ -451,8 +447,8 @@ class TerrainGrass(Entity):
 
 """board"""
 class Tile:
-    def __init__(self, contents):
-        self.contents = contents
+    def __init__(self):
+        self.contents = []
         self.watchers = []
     def add(self, ent):
         self.contents.append(ent)
@@ -470,23 +466,49 @@ class Tile:
         return (self.contents, len(self.watchers))
 def complain(self):
     raise Exception("Invalid operation")
-invalid_tile = Tile([])
-invalid_tile.add = complain # Does this even work? Hope so!
+invalid_tile = Tile()
+invalid_tile.add = complain
 invalid_tile.rm = complain
 
 screen_offset_x = -TILE_WIDTH*5//2
 screen_offset_y = 0
 
-board = [[Tile([]) for i in range(15)] for j in range(15)]
+tile_offset = (0,0)
+board = [[Tile()]] # Init board to have one tile, so checks on len(board[0]) don't fail
 
 def get_tile(pos):
-    (x, y) = pos
+    (x, y) = vec.add(pos, tile_offset)
     if x < 0 or x >= len(board):
         return invalid_tile
     row = board[x]
     if y < 0 or y >= len(row):
         return invalid_tile
     return row[y]
+def require_tile(pos):
+    global tile_offset
+    global board
+    (x, y) = vec.add(pos, tile_offset)
+    width = len(board)
+    height = len(board[0])
+    if x < 0:
+        tile_offset = (tile_offset[0] - x, tile_offset[1])
+        board = [mk_tile_list(height) for i in range(-x)] + board
+        x = 0
+    elif x >= width:
+        board += [mk_tile_list(height) for i in range(x - width + 1)]
+    if y < 0:
+        tile_offset = (tile_offset[0], tile_offset[1] - y)
+        amt = -y
+        for i in range(len(board)): # Cannot use 'width' here, possibly invalidated by x-axis expansion
+            board[i] = mk_tile_list(amt) + board[i]
+        y = 0
+    elif y >= height:
+        amt = y - height + 1
+        for col in board:
+            col += mk_tile_list(amt)
+    return board[x][y]
+def mk_tile_list(n):
+    return [Tile() for i in range(n)]
 def is_walkable(tile):
     ents = tile.contents
     if not ents:
@@ -514,8 +536,7 @@ def tile_to_screen(pos):
     return ((screen_offset_x + TILE_WIDTH*x + int(TILE_WIDTH/2)*y), (screen_offset_y + TILE_HEIGHT*y))
 
 def draw_tile(pos):
-    (x,y)=pos
-    for entity in board[x][y].contents:
+    for entity in get_tile(pos).contents:
         entity.draw(pos)
 
 ready_badges = images.load_teamed("icons", "team_ready.png")
@@ -537,8 +558,8 @@ def redraw():
     if screen_dirty or overlay_active:
         screen_dirty = False
         screen.fill(0x000000)
-        for x in range(0, len(board)):
-            for y in range(0, len(board[x])):
+        for x in range(-tile_offset[0], len(board)-tile_offset[0]):
+            for y in range(-tile_offset[1], len(board[x])-tile_offset[1]):
                 draw_tile((x, y))
     else:
         for pos in dirty_tiles:
@@ -777,6 +798,45 @@ def out(x):
     print(x)
     sys.stdout.flush()
 
+class PanMouseHandler:
+    def __init__(self, pos):
+        self.start_ticks = pg.time.get_ticks()
+        self.start_pos = pos
+        self.start_view = (screen_offset_x, screen_offset_y)
+        self.stage = 1
+        # Pan handler (heh heh) also handles selection
+        select(get_selectable(mouse_to_tile(*pos), get_team()))
+    def update(self, pos):
+        global screen_offset_x, screen_offset_y, screen_dirty
+        offset = vec.sub(pos, self.start_pos)
+        if self.stage == 1:
+            if pg.time.get_ticks() - self.start_ticks >= DRAG_START_MILLIS:
+                self.stage = 2
+            elif offset[0] ** 2 + offset[1] ** 2 >= DRAG_START_PX ** 2:
+                self.stage = 2
+        if self.stage == 2:
+            (screen_offset_x, screen_offset_y) = vec.add(self.start_view, offset)
+            screen_dirty = True
+            redraw()
+    def end(self):
+        pass
+class DrawMouseHandler:
+    def __init__(self, pos):
+        self.tile = mouse_to_tile(*pos)
+        self.rm_mode = bool(get_tile(self.tile).contents)
+        self.touch(self.tile)
+    def update(self, pos):
+        tile = mouse_to_tile(*pos)
+        if tile != self.tile:
+            self.tile = tile
+            if self.rm_mode == bool(get_tile(tile).contents):
+                self.touch(tile)
+    def touch(self, tile):
+        format_str = "e %d %d rm\n" if self.rm_mode else "e %d %d GRASS\n"
+        send(format_str % (tile[0], tile[1]))
+    def end(self):
+        pass
+
 def do_step(requested_time):
     # TODO Draw "loading" bar?
     next_time = tasks.next_time()
@@ -856,47 +916,23 @@ def handle_net_command(who, command, line):
         #send("raw #%X for %s\n" % (myhash(tasks._pending), localname))
         return False
     if command == "mk":
-        what = args[0]
-        unit=False
-        if what == "S":
-            f = Sword
-            unit=True
-        elif what == "A":
-            f = Archer
-            unit=True
-        elif what == "B":
-            f = Berserk
-            unit=True
-        elif what == "G":
-            f = Golem
-            unit=True
-        elif what == 'grass':
-            f = TerrainGrass
-        else:
-            out("Don't know how to make a '%s'" % what)
-            return False
+        #Obsolete, use /e
         pos = (int(args[1]), int(args[2]))
-        if len(args) == 4:
-            created = f(pos, int(args[3]))
-        else:
-            created = f(pos)
-        if unit:
-            ControlledAi(created)
-        redraw()
-        return
+        team = int(args[3]) if len(args) > 3 else None
+        return make_thing(pos, args[0], team)
     if command == "rm":
+        #Obsolete, use /e
         pos = (int(args[0]), int(args[1]))
-        content_copy = get_tile(pos).contents[:]
-        for ent in content_copy:
-            if isinstance(ent, Actor):
-                ent.disintegrate()
-            else:
-                ent.move(None)
-        # Have to redraw the whole screen, since there's nothing left on that tile
-        # to cover up the previous pixels there
-        screen_dirty = True
-        redraw()
+        obliterate_tile(pos)
         return
+    if command == "e":
+        pos = (int(args[0]), int(args[1]))
+        cmd = args[2]
+        if cmd == 'rm':
+            obliterate_tile(pos)
+            return
+        team = int(args[3]) if len(args) > 3 else None
+        return make_thing(pos, cmd, team)
     if command == "bias":
         # Sets a team's directional / handedness biases.
         # Useful during mapmaking to balance things, but it doesn't apply to already-placed units.
@@ -1007,6 +1043,40 @@ def handle_net_command(who, command, line):
         return
     out("> %s issued unknown command %s" % (who, command))
     return False
+def make_thing(pos, name, team):
+    name = name.upper()
+    if name == "S":
+        f = Sword
+    elif name == "A":
+        f = Archer
+    elif name == "B":
+        f = Berserk
+    elif name == "G":
+        f = Golem
+    elif name == "GRASS":
+        f = TerrainGrass
+    else:
+        out("Don't know how to make a '%s'" % name)
+        return False
+    if team != None:
+        created = f(pos, team)
+    else:
+        created = f(pos)
+    if isinstance(created, Actor):
+        ControlledAi(created)
+    redraw()
+def obliterate_tile(pos):
+    global screen_dirty
+    for ent in get_tile(pos).contents.copy():
+        if isinstance(ent, Actor):
+            ent.disintegrate()
+        else:
+            ent.move(None)
+    # Have to redraw the whole screen, since there's nothing left on that tile
+    # to cover up the previous pixels there
+    screen_dirty = True
+    redraw()
+
 
 def send(msg):
     server.send((localname + ":" + msg).encode('utf-8'))
@@ -1056,10 +1126,8 @@ def main():
     send('host\n' if host_hint else 'join\n')
     out("Starting main loop")
 
-    drag_start_ticks = 0
-    drag_start_pos = (0,0)
-    drag_start_view = (0,0)
-    drag_stage = 0
+    mouse_handler = None
+    mouse_mode = 0
     running = True
     while running:
         # Rather than spin up two threads (ugh) we just poll both event sources at 20 Hz
@@ -1114,47 +1182,42 @@ def main():
             if event.type == pg.QUIT:
                 running = False
             elif event.type == pg.MOUSEBUTTONDOWN:
-                tile = mouse_to_tile(*pg.mouse.get_pos())
+                pos = pg.mouse.get_pos()
                 if event.button == 1:
-                    drag_start_ticks = pg.time.get_ticks()
-                    drag_start_pos = pg.mouse.get_pos()
-                    drag_start_view = (screen_offset_x, screen_offset_y)
-                    drag_stage = 1
-                    select(get_selectable(tile, get_team()))
+                    if mouse_mode == 0:
+                        mouse_handler = PanMouseHandler(pos)
+                    else:
+                        mouse_handler = DrawMouseHandler(pos)
                 elif event.button == 3:
                     if selected != None:
+                        tile = mouse_to_tile(*pos)
                         modifier = " 1" if pg.KMOD_SHIFT & pg.key.get_mods() else ""
                         send("do %d %d %d %d%s\n" % (selected[0], selected[1], tile[0], tile[1], modifier))
                 elif event.button == 2:
-                    out("(" + str(tile) + ")")
+                    out("(" + str(mouse_to_tile(*pos)) + ")")
             elif event.type == pg.MOUSEBUTTONUP:
-                if event.button == 1:
-                    drag_stage = 0
+                if event.button == 1 and mouse_handler != None:
+                    mouse_handler.end()
+                    mouse_handler = None
             elif event.type == pg.MOUSEMOTION:
-                if drag_stage > 0:
-                    offset = vec.sub(pg.mouse.get_pos(), drag_start_pos)
-                    if drag_stage == 1:
-                        if pg.time.get_ticks() - drag_start_ticks >= DRAG_START_MILLIS:
-                            drag_stage = 2
-                        elif offset[0] ** 2 + offset[1] ** 2 >= DRAG_START_PX ** 2:
-                            drag_stage = 2
-                    if drag_stage == 2:
-                        (screen_offset_x, screen_offset_y) = vec.add(drag_start_view, offset)
-                        screen_dirty = True
-                        redraw()
+                if mouse_handler != None:
+                    mouse_handler.update(pg.mouse.get_pos())
             elif event.type == pg.KEYDOWN:
                 key = event.key
                 if key == pg.K_SPACE:
                     send("T " + str(360*3) + "\n")
-                if key == pg.K_TAB:
+                elif key == pg.K_TAB:
                     overlay_active = True
                     redraw()
-                if key >= pg.K_1 and key <= pg.K_6:
+                elif key >= pg.K_1 and key <= pg.K_6:
                     if overlay_active:
                         send("team %d\n" % (event.key - pg.K_1))
-                if key >= pg.K_KP_1 and key <= pg.K_KP_6:
+                elif key >= pg.K_KP_1 and key <= pg.K_KP_6:
                     if overlay_active:
                         send("team %d\n" % (event.key - pg.K_KP_1))
+                elif key == pg.K_e:
+                    if pg.KMOD_CTRL & pg.key.get_mods():
+                        mouse_mode ^= 1
             elif event.type == pg.KEYUP:
                 if event.key == pg.K_TAB:
                     overlay_active = False

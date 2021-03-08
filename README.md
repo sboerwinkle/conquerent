@@ -98,11 +98,18 @@ Most commands, listed in order of importance. There's a couple internal ones I o
 
 These are intended for use for map editing. Technically they're available at any time, but using them during a game would be impolite.
 
+- Ctrl+E from the game window to toggle edit mode - currently there is no visual indicator, sadly. In this mode, click+drag paints and erases land instead of panning the view.
 - Middle-click a tile to print its coordinates. This only shows in your output.
-- `/mk [type] [x] [y] [team]` - Creates an entity at the given location. Units will not have any abilities charged. Types:
-  - "grass" - a land space. Do not specify a team.
+- `/e [x] [y] [type] [team]` - Creates an entity at the given location. Units will not have any abilities charged. Types:
   - "S" - [Swordsfighter](https://qwantz.com/index.php?comic=2460)
   - "A" - Archer
-- `/rm [x] [y]` - Removes everything at the given location.
+  - "B" - Berserker
+  - "G" - Golem
+  - "GRASS" and "rm" are used internaly by the edit-mode mouse; neither of these accepts a team.
+- `/bias [team] [angle] [flip]` - Sets a bias, which applies to all units for that team spawned after this point. This only really matters if you want a *perfectly balanced* map.
+  -   angle - What angle the unit spawns "facing", which affects e.g. preferred targets. This will be reset when it moves the first time.
 
-If you want to save it as a map, consider unzipping the log afterwards and cleaning up any accidental commands, e.g. removing and re-creating the same tile, to improve load speed. Remember, there's no magic around save games; it just replays the log.
+      0 is to the right, 1 is just above that, etc, up to 5.
+  -   flip - Affects e.g. which way to go around an obstacle (left or right). Must be 1 or -1.
+
+If you want to save your work as a map, consider unzipping the log afterwards and cleaning up any accidental commands, e.g. removing and re-creating the same tile, to improve load speed. To this end, sorting the file (e.g. with the Unix `sort` util) might prove helpful, but it does re-order commands. Remember, there's no magic around save games; it just replays the log.
