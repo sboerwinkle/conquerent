@@ -121,6 +121,8 @@ class Corpse(Entity):
     def __init__(self, pos, team):
         set_teamed_skin(self, team)
         super().__init__(pos)
+class ExploderCorpse(Corpse):
+    teamed_images = images.load_teamed("units", "exploder_corpse.png")
 
 team_bias_flips=[1,-1,1,-1,1,-1]
 team_bias_angles=[a for a in range(6)]
@@ -335,7 +337,7 @@ class Berserk(MeleeActor):
         if self.dying:
             return
         self.dying = True
-        tasks.Die(self, self.fight_windup_time, tasks.ACT_PATIENCE)
+        tasks.Die(self, self.fight_windup_time, tasks.SLOW_PATIENCE)
 
 class Golem(MeleeActor):
     teamed_torso_frames = images.load_teamed_anim("golem_torso", 2)
@@ -415,6 +417,43 @@ class Archer(Actor):
         for v in range_2_vecs:
             ret.append(vec.add(self.pos, vec.transform(v, self.bias_flip, self.bias_angle)))
         return ret
+
+class Exploder(Actor):
+    teamed_toes = images.load_teamed("units", "exploder_toes.png")
+    teamed_torso_frames = images.load_teamed_anim("exploder_torso", 2)
+    def __init__(self, pos, team):
+        self.torso_frames = self.teamed_torso_frames[team]
+        self.toes = self.teamed_toes[team]
+        # Same move speed as Berserker
+        self.lap_time=288
+        self.fight_windup_time = 0
+        self.dying = False
+        super().__init__(pos, team)
+    def draw(self, pos):
+        frame = int(not self.dying)
+        self._draw(pos, self.torso_frames[frame])
+        if 0 == self.cooldowns[cd_move]:
+            self._draw(pos, self.toes)
+    def take_hit(self):
+        if self.dying:
+            return
+        self.dying = True
+        self.dirty()
+        tasks.Die(self, self.lap_time, tasks.SLOW_PATIENCE)
+    def die(self):
+        corpse = ExploderCorpse(self.pos, self.team)
+        tasks.schedule(tasks.Move(corpse, None), 90)
+        pos = self.pos
+        tasks.Lambda(lambda: explode(pos), 60, tasks.THINK_PATIENCE)
+        self.disintegrate()
+    def get_locs_in_range(self):
+        return []
+def explode(pos):
+    for v in vec.units:
+        p = vec.add(pos, v)
+        for c in get_tile(p).contents:
+            if isinstance(c, Actor):
+                tasks.Hit(c)
 """end entities"""
 
 """symbols"""
@@ -1053,6 +1092,8 @@ def make_thing(pos, name, team):
         f = Berserk
     elif name == "G":
         f = Golem
+    elif name == "E":
+        f = Exploder
     elif name == "GRASS":
         f = TerrainGrass
     else:
@@ -1077,6 +1118,18 @@ def obliterate_tile(pos):
     screen_dirty = True
     redraw()
 
+def team_from_key(k):
+    try:
+        if k >= pg.K_KP_1 and k <= pg.K_KP_6:
+            return k - pg.K_KP_6
+    except AttributeError:
+        global team_from_key
+        team_from_key = safemode_team_from_key
+    return safemode_team_from_key(k)
+def safemode_team_from_key(k):
+    if k >= pg.K_1 and k <= pg.K_6:
+        return k - pg.K_1
+    return None
 
 def send(msg):
     server.send((localname + ":" + msg).encode('utf-8'))
@@ -1209,15 +1262,22 @@ def main():
                 elif key == pg.K_TAB:
                     overlay_active = True
                     redraw()
-                elif key >= pg.K_1 and key <= pg.K_6:
-                    if overlay_active:
-                        send("team %d\n" % (event.key - pg.K_1))
-                elif key >= pg.K_KP_1 and key <= pg.K_KP_6:
-                    if overlay_active:
-                        send("team %d\n" % (event.key - pg.K_KP_1))
                 elif key == pg.K_e:
                     if pg.KMOD_CTRL & pg.key.get_mods():
                         mouse_mode ^= 1
+                elif key == pg.K_s:
+                    if pg.KMOD_CTRL & pg.key.get_mods():
+                        save_path = "saves/saved.gz"
+                        logfile.close()
+                        shutil.copyfile(log_filename, save_path)
+                        logfile = gzip.open(log_filename, "ab")
+                        out("Wrote to '%s'" % save_path)
+                else:
+                    team = team_from_key(key)
+                    if team != None:
+                        if overlay_active:
+                            send("team %d\n" % team)
+                        continue
             elif event.type == pg.KEYUP:
                 if event.key == pg.K_TAB:
                     overlay_active = False

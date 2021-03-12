@@ -113,16 +113,18 @@ class Hit(Task):
 class Die(Task):
     def __init__(self, actor, time=0, patience=0):
         super().__init__()
-        # Even if time is 0, there are other concurrent actions that might want to go through, like hitting back
+        # Even if time is 0, there are other concurrent actions that might want to go through, like moving
         schedule(self, time, patience)
         self.actor = actor
     def run(self):
         self.actor.die()
 
 class Lambda(Task):
-    def __init__(self, l, time = None):
-        super().__init__(time)
+    def __init__(self, l, time, patience):
+        super().__init__()
         self.l = l
+        # TODO This maybe should be default Task behavior?
+        schedule(self, time, patience)
     def run(self):
         self.l()
 
@@ -131,7 +133,8 @@ _immediates=[[]]
 running = 0
 THINK_PATIENCE=1
 ACT_PATIENCE=2
-MAX_PATIENCE=3
+SLOW_PATIENCE=3
+MAX_PATIENCE=4
 def schedule(task, time, patience=None):
     "Some tasks will auto-schedule themselves on construction, but this is useful for the others."
     if patience != None:
