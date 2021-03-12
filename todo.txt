@@ -54,6 +54,8 @@ Important
 	At the very least, remove the need for bitwise-math in your head
 - Alliances must be mutual?
 	If this is done, breaking an alliance should un-ready at least the involved parties
+- Visual indicator for edit mode
+- Exploders have standby mode?
 
 Not Important
 =============

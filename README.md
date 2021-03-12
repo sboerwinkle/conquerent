@@ -65,6 +65,8 @@ Golems have 2 health, and will heal if they have nothing else to do.
 
 Berserkers are quite dangerous; they move and attack slightly faster, can kill a Golem in one hit, and can push through a fatal wound long enough for one more hit. A well-placed Archer will still make short work of a Berserker, though.
 
+Exploders can push through a fatal wound long enough to close with the enemy, making them effective against Archers. When they do die, they will hit everything around them, including allies.
+
 ## Saves
 
 The game records all commands (except chat, and some other unimportant stuff) in a log. This also serves as the save system, since logs can be replayed.
@@ -72,7 +74,9 @@ New logs are gzipped by default, though a plain text file can also be loaded as 
 On Linux, you can use the `gunzip` / `gzip` utilities to work with gzipped saves.
 
 The game ships with some map(s) in `saves/`.
-Alternatively, when you exit the program, the current log will be saved in `saves/most_recent.gz`. It is recommended to rename this if it's a save you care about, since it is overwritten each time.
+In game, you can press Ctrl+S to write out a save of the current state to `saves/saved.gz`.
+Alternatively, when you exit the program, the current log will be saved in `saves/most_recent.gz`.
+In either case, it is recommended to rename this if it's a save you care about, since it is overwritten each time.
 
 A save can be loaded by specifying the path to it as the 4th arg (after port). This also marks you as the host, meaning when new players join you will automatically send them the log line-by-line to get them up to speed. See `/sync` in the Commands section, below.
 
