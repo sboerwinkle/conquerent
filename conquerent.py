@@ -622,10 +622,14 @@ def redraw():
         for i in range(len(seats)):
             displayName = seats[i].name
             if localteam != None:
-                if localteam == i:
-                    displayName += " (ME)"
-                elif (team_alliance[i] & team_alliance[localteam]) != 0:
-                    if team_alliance[i] == team_alliance[localteam]:
+                team = seats[i].team
+                if localteam == team:
+                    if seats[i].name == localname:
+                        displayName += " (ME)"
+                    else:
+                        displayName += " (TEAMMATE)"
+                elif (team_alliance[team] & team_alliance[localteam]) != 0:
+                    if team_alliance[team] == team_alliance[localteam]:
                         displayName += " (BUDDY)"
                     else:
                         displayName += " (CEASEFIRE)"
@@ -1121,7 +1125,7 @@ def obliterate_tile(pos):
 def team_from_key(k):
     try:
         if k >= pg.K_KP_1 and k <= pg.K_KP_6:
-            return k - pg.K_KP_6
+            return k - pg.K_KP_1
     except AttributeError:
         global team_from_key
         team_from_key = safemode_team_from_key
