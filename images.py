@@ -4,7 +4,15 @@ import pygame as pg
 if not pg.image.get_extended():
     raise SystemExit("Extended image module req'd, aborting")
 
-teamed_colors=[(255, 0, 0, 255), (0xFF, 0x8f, 0x26, 255), (0x03, 0xC2, 0xFC, 255), (128, 128, 128, 255), (0x84, 0x03, 0xFC, 255), (0xFA, 0xAA, 0xF3, 255)]
+teamed_colors=[
+        (255, 0, 0, 255),
+        (0xFF, 0x8f, 0x26, 255),
+        (0x03, 0xC2, 0xFC, 255),
+        (128, 128, 128, 255),
+        (0x84, 0x03, 0xFC, 255),
+        (0xFA, 0xAA, 0xF3, 255),
+        (255, 255, 255, 255), # Ghost team is white
+]
 
 def load(*segments):
     return pg.image.load(os.path.join("assets", *segments)).convert_alpha()

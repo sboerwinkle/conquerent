@@ -124,26 +124,22 @@ class Corpse(Entity):
 class ExploderCorpse(Corpse):
     teamed_images = images.load_teamed("units", "exploder_corpse.png")
 
-team_bias_flips=[1,-1,1,-1,1,-1]
-team_bias_angles=[a for a in range(6)]
+team_bias_flips=[1,-1,1,-1,1,-1,1]
+team_bias_angles=[a%6 for a in range(7)]
 #starting alliance bitmaps are powers of two. Cease-fires are for teams that have non-zero bitwise AND. Resource sharing should be implemented only among matching team_alliance values.
-team_alliance = [1<<a for a in range(6)]
-unit_counts = [0]*6
+team_alliance = [1<<a for a in range(6)] + [(1<<6) - 1] # Ghost team isn't hostile towards anyone
+actor_counts = [0]*7
 
 # Cooldown keys. We use short strings b/c it looks legit
 cd_move="mv"
 cd_fight="atk"
 cd_recover="rcvr"
-# TODO What belongs to this class vs. Sword is a little vague,
-#   should be move obvious where to draw the line when there are more units.
+
 class Actor(Entity):
+    "An Actor is an Entity that has a team, can receive hits, and might submit Tasks."
     obstructs = True
     def __init__(self, pos, team):
         self.team = team
-        self.dead = False
-        self.cooldowns = {cd_move: self.lap_time, cd_fight: self.fight_windup_time, cd_recover: 0}
-        super().__init__(pos)
-        self.ai = None
         self.tasks = []
         # Bias allows tie-breaking to be independent of absolute board orientation,
         # meaning so long as any start position can be rotated and/or flipped to look
@@ -151,6 +147,58 @@ class Actor(Entity):
         # ... Assuming I don't have any bugs.
         self.bias_flip = team_bias_flips[team]
         self.bias_angle = team_bias_angles[team]
+        super().__init__(pos)
+
+    def move(self, pos):
+        if self.pos == None:
+            actor_counts[self.team] += 1
+        if pos == None:
+            actor_counts[self.team] -= 1
+        super().move(pos)
+
+    def handle_finish(self, task):
+        self.tasks.remove(task)
+    def handle_cancel(self, task):
+        self.tasks.remove(task)
+    def has_task(self, task):
+        self.tasks.append(task)
+        task.onfinish(self.handle_finish)
+        task.oncancel(self.handle_cancel)
+
+    def take_hit(self):
+        # You should override this
+        out("No take_hit() defined for %s!!" % str(self.__class__))
+
+class Castle(Actor):
+    teamed_sprites = images.load_teamed("structures", "castle.png")
+    def __init__(self, pos, team=6):
+        self.image = self.teamed_sprites[team]
+        super().__init__(pos, team)
+
+    def change_team(self, team):
+        if self.pos != None:
+            actor_counts[team] += 1
+            actor_counts[self.team] -= 1
+        self.team = team
+        self.image = self.teamed_sprites[team]
+        get_tile(self.pos).handle_activity(self)
+        self.dirty()
+
+    def take_hit(self):
+        if self.team == 6:
+            out("Somebody's hitting a ghost castle, which is weird")
+            return
+        self.change_team(6)
+
+# TODO What belongs to this class vs. Sword is a little vague,
+#   should be move obvious where to draw the line when there are more units.
+class Unit(Actor):
+    "A Unit is an Actor that has an AI, moves, and (typically) attacks."
+    def __init__(self, pos, team):
+        self.dead = False
+        self.cooldowns = {cd_move: self.lap_time, cd_fight: self.fight_windup_time, cd_recover: 0}
+        super().__init__(pos, team)
+        self.ai = None
 
     def draw(self, pos):
         frame = int(0 == self.cooldowns[cd_move])
@@ -159,10 +207,6 @@ class Actor(Entity):
         self._draw(pos, self.arm_frames[frame])
 
     def move(self, pos):
-        if self.pos == None:
-            unit_counts[self.team] += 1
-        if pos == None:
-            unit_counts[self.team] -= 1
         super().move(pos)
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = max(self.cooldowns[cd_fight], self.fight_windup_time // 2)
@@ -180,7 +224,7 @@ class Actor(Entity):
         self.disintegrate()
 
     def handle_finish(self, task):
-        self.tasks.remove(task)
+        super().handle_finish(task)
         if self.ai != None:
             # TODO as an optimization, there's probably no point in queueing the AI
             #   if we have an un-cancellable task in progress. Leaving it unoptimized
@@ -188,14 +232,9 @@ class Actor(Entity):
             #   appropriately handle edge cases
             self.ai.queue_immediately()
     def handle_cancel(self, task):
-        self.tasks.remove(task)
+        super().handle_cancel(task)
         if self.ai != None:
             self.ai.queue_immediately()
-
-    def has_task(self, task):
-        self.tasks.append(task)
-        task.onfinish(self.handle_finish)
-        task.oncancel(self.handle_cancel)
 
     def charge(self, cd_key):
         " Returns whether the given cooldown is ready to be used, and starts it charging if possible "
@@ -229,6 +268,9 @@ class Actor(Entity):
     def fight(self, target):
         self.has_task(tasks.Hit(target))
 
+    def should_capture(self, pos):
+        # TODO: If adjacent, this behaves differently
+        return self.should_navigate(pos)
     def should_navigate(self, pos):
         delta = vec.sub(pos, self.pos)
         angles = vec.calc_angles(delta, self.bias_flip)
@@ -272,6 +314,7 @@ class Actor(Entity):
         self.fight(target)
         return True
     def should_target(self, target):
+        self.ai.watch(target.pos)
         if self.is_loc_in_range(target.pos):
             return self.should_fight(target)
         else:
@@ -284,6 +327,7 @@ class Actor(Entity):
         for loc in locs:
             target = self.choose_target(loc)
             if target != None:
+                self.ai.watch(loc)
                 if not self.should_fight(target):
                     out("ERROR: should_fight returned False for a location in range with a valid target. %s %s->%s" % (self.__class__.__name__, str(self.pos), str(loc)))
                 return True
@@ -303,7 +347,7 @@ class Actor(Entity):
     def customhash(self):
         return (super().customhash(), self.team, self.ai)
 
-class MeleeActor(Actor):
+class MeleeUnit(Unit):
     def get_locs_in_range(self):
         ret = []
         for x in [0,1,-1,2,-2,3]:
@@ -311,7 +355,7 @@ class MeleeActor(Actor):
             ret.append(vec.add(self.pos, vec.units[angle]))
         return ret
 
-class Sword(MeleeActor):
+class Sword(MeleeUnit):
     teamed_body_frames = images.load_teamed_anim("sword_body", 2)
     teamed_arm_frames = images.load_teamed_anim("sword_arm", 3)
     def __init__(self, pos, team):
@@ -320,7 +364,7 @@ class Sword(MeleeActor):
         self.fight_windup_time=180
         super().__init__(pos, team)
 
-class Berserk(MeleeActor):
+class Berserk(MeleeUnit):
     teamed_body_frames = images.load_teamed_anim("berserk_body", 2)
     teamed_arm_frames = images.load_teamed_anim("berserk_arm", 3)
     def __init__(self, pos, team):
@@ -339,7 +383,7 @@ class Berserk(MeleeActor):
         self.dying = True
         tasks.Die(self, self.fight_windup_time, tasks.SLOW_PATIENCE)
 
-class Golem(MeleeActor):
+class Golem(MeleeUnit):
     teamed_torso_frames = images.load_teamed_anim("golem_torso", 2)
     teamed_arm_frames = images.load_teamed_anim("golem_arm", 3)
     teamed_toes = images.load_teamed("units", "golem_toes.png")
@@ -386,7 +430,7 @@ class Golem(MeleeActor):
         super().fight(target)
         self.cooldowns[cd_recover] = self.recover_time
 
-class Archer(Actor):
+class Archer(Unit):
     teamed_body_frames = images.load_teamed_anim("archer_body", 2)
     teamed_arm_frames = images.load_teamed_anim("archer_arm", 3)
     def __init__(self, pos, team):
@@ -397,7 +441,7 @@ class Archer(Actor):
     def get_locs_in_range(self):
         ret = []
         # Firstly, target anyone adjacent.
-        # This is almost elegant, a list of angles offsets, as from MeleeActor.
+        # This is almost elegant, a list of angles offsets, as from MeleeUnit.
         for x in [0,-1,1,-2,2,-3]:
             angle = (6 + x*self.bias_flip + self.bias_angle) % 6
             ret.append(vec.add(self.pos, vec.units[angle]))
@@ -418,7 +462,7 @@ class Archer(Actor):
             ret.append(vec.add(self.pos, vec.transform(v, self.bias_flip, self.bias_angle)))
         return ret
 
-class Exploder(Actor):
+class Exploder(Unit):
     teamed_toes = images.load_teamed("units", "exploder_toes.png")
     teamed_torso_frames = images.load_teamed_anim("exploder_torso", 2)
     def __init__(self, pos, team):
@@ -499,7 +543,7 @@ class Tile:
         if ent.visible:
             # tile_update() typically cleans up watchers (while we're iterating it!),
             # so we have to make a quick dupe w/ slice notation
-            for l in self.watchers[:]:
+            for l in self.watchers.copy():
                 l.tile_update()
     def customhash(self):
         return (self.contents, len(self.watchers))
@@ -561,10 +605,10 @@ def is_walkable_later(tile):
     if not ents:
         return False
     for e in ents:
-        # Actors and corpses might move later, but other things probably won't.
+        # Units and corpses might move later, but other things probably won't.
         # At the moment, "other things" is just MoveClaimTokens, which always disappear after a turn;
         # there's no fair way to have AIs watch those while still completing a turn, so they give up instead.
-        if e.obstructs and not (isinstance(e, Actor) or isinstance(e, Corpse)):
+        if e.obstructs and not (isinstance(e, Unit) or isinstance(e, Corpse)):
             return False
     return True
 """end board"""
@@ -638,7 +682,7 @@ def redraw():
     # Always draw badges
     for i in range(len(seats)):
         s = seats[i]
-        if unit_counts[s.team] == 0:
+        if actor_counts[s.team] == 0:
             sheet = dead_badges
         elif s.time == -1:
             sheet = waiting_badges
@@ -695,6 +739,12 @@ class GotoCommand(Command):
         self.pos = pos
     def customhash(self):
         return (self.pos, super().customhash())
+class CaptureCommand(Command):
+    def __init__(self, pos):
+        super().__init__('capture')
+        self.pos = pos
+    def customhash(self):
+        return (self.pos, super().customhash())
 class ControlledAi(Ai):
     def __init__(self, ent):
         super().__init__(ent)
@@ -708,7 +758,11 @@ class ControlledAi(Ai):
         else:
             self.todo_now(command)
     def mk_tile_command(self, pos):
-        if get_tile(pos).contents:
+        items = get_tile(pos).contents
+        for item in items:
+            if isinstance(item, Castle):
+                return CaptureCommand(pos)
+        if items:
             return GotoCommand(pos)
         return None
     def think(self):
@@ -727,11 +781,14 @@ class ControlledAi(Ai):
                 if self.ent.should_autofight() or self.ent.should_navigate(command.pos):
                     return
                 #Else, no path, abort command and fall thru
+            elif command.mode == "capture":
+                if self.ent.should_autofight() or self.ent.should_capture(command.pos):
+                    return
             else:
                 raise "Unknown command mode '%s'" % command.mode
     def draw_symbols(self):
         for command in self.todo:
-            if command.mode == "goto":
+            if command.mode in ("goto", "capture"):
                 TargetSymbol(command.pos)
     def customhash(self):
         return (self.todo, super().customhash())
@@ -750,7 +807,7 @@ def mouse_to_tile(x, y):
 
 def get_selectable(pos, team):
     for x in get_tile(pos).contents:
-        if isinstance(x, Actor) and x.team == team:
+        if isinstance(x, Unit) and x.team == team:
             return x
 def send_tile_command(ent, pos, append):
     ai = ent.ai
@@ -1039,7 +1096,7 @@ def handle_net_command(who, command, line):
             for tile in brow:
                 for content in tile.contents:
                     #we are an ai'd actor who is on a team affected by this change
-                    if isinstance(content, Actor) and content.ai != None and affected[content.team]:
+                    if isinstance(content, Unit) and content.ai != None and affected[content.team]:
                         content.ai.queue_immediately()
         out("> %s set team %d to alliance code %d" % (who, int(args[0]), int(args[1])))
         return
@@ -1054,7 +1111,7 @@ def handle_net_command(who, command, line):
     if command == "T":
         seat.time = int(line)
         try:
-            requested_time = min(s.time for s in seats if unit_counts[s.team] != 0)
+            requested_time = min(s.time for s in seats if actor_counts[s.team] != 0)
         except ValueError:
             # All seated teams are dead, nothing to do.
             requested_time = -1
@@ -1098,6 +1155,8 @@ def make_thing(pos, name, team):
         f = Golem
     elif name == "E":
         f = Exploder
+    elif name == "CASTLE":
+        f = Castle
     elif name == "GRASS":
         f = TerrainGrass
     else:
@@ -1107,13 +1166,13 @@ def make_thing(pos, name, team):
         created = f(pos, team)
     else:
         created = f(pos)
-    if isinstance(created, Actor):
+    if isinstance(created, Unit):
         ControlledAi(created)
     redraw()
 def obliterate_tile(pos):
     global screen_dirty
     for ent in get_tile(pos).contents.copy():
-        if isinstance(ent, Actor):
+        if isinstance(ent, Unit):
             ent.disintegrate()
         else:
             ent.move(None)
