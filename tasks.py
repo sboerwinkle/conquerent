@@ -118,6 +118,15 @@ class Die(Task):
         self.actor = actor
     def run(self):
         self.actor.die()
+class Capture(Task):
+    def __init__(self, actor, castle):
+        super().__init__()
+        immediately(ACT_PATIENCE, self)
+        self.actor = actor
+        self.castle = castle
+    def run(self):
+        self.castle.convert(self.actor.team)
+        self.actor.disintegrate()
 
 class Lambda(Task):
     def __init__(self, l, time, patience):

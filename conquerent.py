@@ -2,7 +2,7 @@
 """
 The game itself!
 
-Much credit goes to the pygame maintainers for their wondeful, many-exampled library.
+Much credit goes to the pygame maintainers for their wonderful, many-exampled library.
 """
 
 #Change this stuff as you desire
@@ -190,6 +190,11 @@ class Castle(Actor):
             return
         self.change_team(6)
 
+    def convert(self, team):
+        pass
+        # TODO this should record the team that is attempting conversion, and issue a patience-0 task to change_team.
+        # If a different team also attempts conversion, then when the change_team task arrives go to the ghost team.
+
 # TODO What belongs to this class vs. Sword is a little vague,
 #   should be move obvious where to draw the line when there are more units.
 class Unit(Actor):
@@ -269,16 +274,28 @@ class Unit(Actor):
         self.has_task(tasks.Hit(target))
 
     def should_capture(self, pos):
-        # TODO: If adjacent, this behaves differently
-        return self.should_navigate(pos)
+        delta = vec.sub(pos, self.pos)
+        if vec.measure(delta) > 1:
+            return self.should_navigate(pos)
+        if not self.charge(cd_move):
+            return True
+        for x in get_tile(pos).contents:
+            if isinstance(x, Castle):
+                castle = x
+                break
+        else:
+            out("I'm sorry Mario, but your castle is in another castle! (This is a bug)")
+            return False
+        self.has_task(tasks.Capture(self, castle))
+        return True
     def should_navigate(self, pos):
         delta = vec.sub(pos, self.pos)
         angles = vec.calc_angles(delta, self.bias_flip)
+        self.bias_angle = angles[0]
         # Charge first before checking destinations;
         # some obstructions (notably move claim tokens) are temporary, and we don't want to report a failure
         # until we're actually ready to move and the obstacle is still there.
         if not self.charge(cd_move):
-            self.bias_angle = angles[0]
             return True
 
         watchables = []

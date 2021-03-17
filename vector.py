@@ -6,6 +6,12 @@ def sub(v1, v2):
 def mult(v1, c):
     return (v1[0]*c, v1[1]*c)
 
+def measure(v):
+    (x,y) = v
+    if x*y >= 0:
+        return abs(x+y)
+    return max(abs(x), abs(y))
+
 # This function lovingly constructed on graph paper!
 # Returns a list of angles to try to reach that vector, in preference order.
 # Only returns angles that will reduce the "true" (euclidean) distance to the target.
