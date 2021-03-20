@@ -136,7 +136,7 @@ cd_fight="atk"
 cd_recover="rcvr"
 
 class Actor(Entity):
-    "An Actor is an Entity that has a team, can receive hits, and might submit Tasks."
+    "An Actor is an Entity that has a team and maybe an ai, can receive hits, and might submit Tasks."
     obstructs = True
     def __init__(self, pos, team):
         self.team = team
@@ -147,6 +147,8 @@ class Actor(Entity):
         # ... Assuming I don't have any bugs.
         self.bias_flip = team_bias_flips[team]
         self.bias_angle = team_bias_angles[team]
+        self.ai = None
+        self.dead = False
         super().__init__(pos)
 
     def move(self, pos):
@@ -155,11 +157,25 @@ class Actor(Entity):
         if pos == None:
             actor_counts[self.team] -= 1
         super().move(pos)
+    def disintegrate(self):
+        self.dead = True
+        self.move(None)
+        if self.ai != None:
+            self.ai.clear_watches()
+        # We don't cancel tasks, since some of them might be immediate by this point
 
     def handle_finish(self, task):
         self.tasks.remove(task)
+        if self.ai != None:
+            # TODO as an optimization, there's probably no point in queueing the AI
+            #   if we have an un-cancellable task in progress. Leaving it unoptimized
+            #   for now, since it helps to make sure all the should_foo methods
+            #   appropriately handle edge cases
+            self.ai.queue_immediately()
     def handle_cancel(self, task):
         self.tasks.remove(task)
+        if self.ai != None:
+            self.ai.queue_immediately()
     def has_task(self, task):
         self.tasks.append(task)
         task.onfinish(self.handle_finish)
@@ -173,7 +189,11 @@ class Castle(Actor):
     teamed_sprites = images.load_teamed("structures", "castle.png")
     def __init__(self, pos, team=6):
         self.image = self.teamed_sprites[team]
+        self.unit_type = None
+        self.pending_team = None
+        self.charged = False
         super().__init__(pos, team)
+        SimpleAi(self)
 
     def change_team(self, team):
         if self.pos != None:
@@ -190,20 +210,51 @@ class Castle(Actor):
             return
         self.change_team(6)
 
-    def convert(self, team):
-        pass
-        # TODO this should record the team that is attempting conversion, and issue a patience-0 task to change_team.
-        # If a different team also attempts conversion, then when the change_team task arrives go to the ghost team.
+    def convert(self, team, unit_type):
+        if self.pending_team == None:
+            self.pending_team = team
+            self.pending_unit_type = unit_type
+            self.has_task(tasks.Lambda(self.resolve_conversion, 0, 0))
+        elif self.pending_team != team or self.pending_unit_type != unit_type:
+            self.pending_team = 6
+            self.pending_unit_type = None
+
+    def resolve_conversion(self):
+        if self.pending_team == self.team and self.pending_unit_type == self.unit_type:
+            return
+        for t in self.tasks.copy():
+            if isinstance(t, tasks.BlankTask):
+                t.cancel()
+        # maybe not strictly necessary, but it marks the tile as having activity etc
+        self.change_team(self.pending_team)
+        self.pending_team = None
+        self.unit_type = self.pending_unit_type
+        self.charged = False
+
+    # TODO Should this have a base impl at the Actor level?
+    def should_chill(self):
+        if self.tasks or self.team == 6:
+            return True
+        if not self.charged:
+            self.charged = True
+            cooldown = 360*3 if self.unit_type == Sword else 360*5
+            self.has_task(tasks.BlankTask(cooldown))
+            return True
+        for x in get_tile(self.pos).contents:
+            if x.obstructs and x != self:
+                self.ai.watch(self.pos)
+                return True
+        self.charged = False
+        # TODO I am being lazy, maybe make this more legible?
+        self.has_task(tasks.Lambda(lambda: ControlledAi(self.unit_type(self.pos, self.team)), 0, tasks.ACT_PATIENCE))
 
 # TODO What belongs to this class vs. Sword is a little vague,
 #   should be move obvious where to draw the line when there are more units.
 class Unit(Actor):
     "A Unit is an Actor that has an AI, moves, and (typically) attacks."
     def __init__(self, pos, team):
-        self.dead = False
         self.cooldowns = {cd_move: self.lap_time, cd_fight: self.fight_windup_time, cd_recover: 0}
         super().__init__(pos, team)
-        self.ai = None
 
     def draw(self, pos):
         frame = int(0 == self.cooldowns[cd_move])
@@ -216,30 +267,10 @@ class Unit(Actor):
         self.cooldowns[cd_move] = self.lap_time
         self.cooldowns[cd_fight] = max(self.cooldowns[cd_fight], self.fight_windup_time // 2)
 
-    def disintegrate(self):
-        self.move(None)
-        self.dead = True
-        if self.ai != None:
-            self.ai.clear_watches()
-        # We don't cancel tasks, since some of them might be immediate by this point
-
     def die(self):
         corpse = Corpse(self.pos, self.team)
         tasks.schedule(tasks.Move(corpse, None), 90)
         self.disintegrate()
-
-    def handle_finish(self, task):
-        super().handle_finish(task)
-        if self.ai != None:
-            # TODO as an optimization, there's probably no point in queueing the AI
-            #   if we have an un-cancellable task in progress. Leaving it unoptimized
-            #   for now, since it helps to make sure all the should_foo methods
-            #   appropriately handle edge cases
-            self.ai.queue_immediately()
-    def handle_cancel(self, task):
-        super().handle_cancel(task)
-        if self.ai != None:
-            self.ai.queue_immediately()
 
     def charge(self, cd_key):
         " Returns whether the given cooldown is ready to be used, and starts it charging if possible "
@@ -286,6 +317,9 @@ class Unit(Actor):
         else:
             out("I'm sorry Mario, but your castle is in another castle! (This is a bug)")
             return False
+        if castle.team == self.team and castle.unit_type == self.__class__:
+            self.ai.watch(pos)
+            return True
         self.has_task(tasks.Capture(self, castle))
         return True
     def should_navigate(self, pos):
@@ -319,9 +353,13 @@ class Unit(Actor):
                 return [dest]
             # Else, no ideas to try.
             return []
-        self.has_task(tasks.TokenResolver(self, MoveClaimToken(dest)))
+        self.has_task(tasks.TokenResolver(self.move_validated, MoveClaimToken(dest)))
         self.bias_angle = angle
         return True
+    def move_validated(self, pos):
+        task = tasks.Move(self, pos)
+        tasks.immediately(tasks.ACT_PATIENCE, task)
+        self.has_task(task)
     def should_fight(self, target):
         if not self.charge(cd_fight):
             return True
@@ -745,6 +783,10 @@ class Ai(tasks.Task):
         self.queue_immediately()
     def draw_symbols(self):
         pass
+class SimpleAi(Ai):
+    "Just repeatedly tells the target that it should_chill, effectively deferring logic to the unit type"
+    def think(self):
+        self.ent.should_chill()
 class Command:
     def __init__(self, mode):
         self.mode = mode

@@ -37,6 +37,10 @@ class Task:
             l(self)
     def customhash(self):
         return (self.__class__.__name__, self.time)
+class BlankTask(Task):
+    "Basically a timer. Takes no action on its own."
+    def run(self):
+        pass
 class Keepalive(Task):
     """A dumb task that just makes sure the "minimum time to next task" is always well-defined, because it's always in the queue"""
     def __init__(self):
@@ -83,21 +87,18 @@ class Charge(DumbChargeTask):
             k.cancel()
         super().cancel()
 class TokenResolver(Task):
-    def __init__(self, actor, token):
+    def __init__(self, f, token):
         super().__init__()
         immediately(0, self)
-        self.actor = actor
+        self.f = f
         self.token = token
     def run(self):
-        actor = self.actor
         token = self.token
         token.obstructs = True
         immediately(ACT_PATIENCE, Move(token, None))
         if token.valid:
+            self.f(token.pos)
             """...eprint("Move accepted")"""
-            task = Move(actor, token.pos)
-            immediately(ACT_PATIENCE, task)
-            actor.has_task(task)
             return
         else:
             """...eprint("Couldn't move, conflicted")"""
@@ -125,7 +126,8 @@ class Capture(Task):
         self.actor = actor
         self.castle = castle
     def run(self):
-        self.castle.convert(self.actor.team)
+        # TODO __class__ stuff is a gross hack, needs to be better eventually
+        self.castle.convert(self.actor.team, self.actor.__class__)
         self.actor.disintegrate()
 
 class Lambda(Task):

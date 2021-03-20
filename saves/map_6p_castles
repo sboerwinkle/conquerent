@@ -1,0 +1,173 @@
+:bias 0 5 1
+:bias 1 4 -1
+:bias 2 3 1
+:bias 3 2 -1
+:bias 4 1 1
+:bias 5 0 -1
+:e -1 -1 GRASS
+:e -1 0 GRASS
+:e -1 1 GRASS
+:e -1 2 GRASS
+:e -1 3 GRASS
+:e -1 4 GRASS
+:e -1 5 GRASS
+:e -1 6 GRASS
+:e -1 7 GRASS
+:e -1 8 GRASS
+:e -1 9 GRASS
+:e -2 0 GRASS
+:e -2 1 GRASS
+:e -2 1 b 5
+:e -2 2 GRASS
+:e -2 2 a 5
+:e -2 3 GRASS
+:e -2 3 g 5
+:e -2 4 GRASS
+:e -2 5 GRASS
+:e -2 6 GRASS
+:e -2 6 g 4
+:e -2 7 GRASS
+:e -2 7 a 4
+:e -2 8 GRASS
+:e -2 8 b 4
+:e -2 9 GRASS
+:e -3 1 GRASS
+:e -3 1 s 5
+:e -3 2 GRASS
+:e -3 2 castle
+:e -3 3 GRASS
+:e -3 3 e 5
+:e -3 4 GRASS
+:e -3 4 s 5
+:e -3 6 GRASS
+:e -3 6 s 4
+:e -3 7 GRASS
+:e -3 7 e 4
+:e -3 8 GRASS
+:e -3 8 castle
+:e -3 9 GRASS
+:e -3 9 s 4
+:e 0 -1 GRASS
+:e 0 -2 GRASS
+:e 0 3 GRASS
+:e 0 4 GRASS
+:e 0 8 GRASS
+:e 0 9 GRASS
+:e 1 -2 GRASS
+:e 1 -3 GRASS
+:e 1 0 GRASS
+:e 1 0 castle
+:e 1 1 GRASS
+:e 1 2 GRASS
+:e 1 3 GRASS
+:e 1 4 GRASS
+:e 1 5 GRASS
+:e 1 6 GRASS
+:e 1 6 castle
+:e 1 8 GRASS
+:e 1 9 GRASS
+:e 10 -1 GRASS
+:e 10 -2 GRASS
+:e 10 -3 GRASS
+:e 10 -4 GRASS
+:e 10 -4 s 1
+:e 10 0 GRASS
+:e 10 1 GRASS
+:e 10 1 s 2
+:e 2 -2 GRASS
+:e 2 -3 GRASS
+:e 2 -3 b 0
+:e 2 -4 GRASS
+:e 2 -4 s 0
+:e 2 0 GRASS
+:e 2 2 GRASS
+:e 2 3 GRASS
+:e 2 5 GRASS
+:e 2 7 GRASS
+:e 2 8 GRASS
+:e 2 8 b 3
+:e 2 9 GRASS
+:e 2 9 s 3
+:e 3 -2 GRASS
+:e 3 -3 GRASS
+:e 3 -3 a 0
+:e 3 -4 GRASS
+:e 3 -4 castle
+:e 3 0 GRASS
+:e 3 1 GRASS
+:e 3 2 GRASS
+:e 3 2 castle
+:e 3 3 GRASS
+:e 3 4 GRASS
+:e 3 6 GRASS
+:e 3 7 GRASS
+:e 3 7 a 3
+:e 3 8 GRASS
+:e 3 8 castle
+:e 4 -1 GRASS
+:e 4 -2 GRASS
+:e 4 -3 GRASS
+:e 4 -3 g 0
+:e 4 -4 GRASS
+:e 4 -4 e 0
+:e 4 0 GRASS
+:e 4 1 GRASS
+:e 4 2 GRASS
+:e 4 3 GRASS
+:e 4 4 GRASS
+:e 4 5 GRASS
+:e 4 6 GRASS
+:e 4 6 g 3
+:e 4 7 GRASS
+:e 4 7 e 3
+:e 5 -1 GRASS
+:e 5 -2 GRASS
+:e 5 -3 GRASS
+:e 5 -4 GRASS
+:e 5 -4 s 0
+:e 5 0 GRASS
+:e 5 2 GRASS
+:e 5 3 GRASS
+:e 5 4 GRASS
+:e 5 5 GRASS
+:e 5 6 GRASS
+:e 5 6 s 3
+:e 6 -2 GRASS
+:e 6 -3 GRASS
+:e 6 0 GRASS
+:e 6 1 GRASS
+:e 6 3 GRASS
+:e 6 4 GRASS
+:e 7 -2 GRASS
+:e 7 -3 GRASS
+:e 7 -3 g 1
+:e 7 -4 GRASS
+:e 7 -4 s 1
+:e 7 0 GRASS
+:e 7 0 castle
+:e 7 2 GRASS
+:e 7 3 GRASS
+:e 7 3 g 2
+:e 7 4 GRASS
+:e 7 4 s 2
+:e 8 -2 GRASS
+:e 8 -3 GRASS
+:e 8 -3 a 1
+:e 8 -4 GRASS
+:e 8 -4 e 1
+:e 8 1 GRASS
+:e 8 2 GRASS
+:e 8 2 a 2
+:e 8 3 GRASS
+:e 8 3 e 2
+:e 9 -1 GRASS
+:e 9 -2 GRASS
+:e 9 -3 GRASS
+:e 9 -3 b 1
+:e 9 -4 GRASS
+:e 9 -4 castle
+:e 9 0 GRASS
+:e 9 1 GRASS
+:e 9 1 b 2
+:e 9 2 GRASS
+:e 9 2 castle
