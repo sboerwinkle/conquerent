@@ -155,6 +155,8 @@ class Actor(Entity):
         if self.pos == None:
             actor_counts[self.team] += 1
         if pos == None:
+            if not self.dead:
+                raise Exception("Actors expect to not leave the board until dead!")
             actor_counts[self.team] -= 1
         super().move(pos)
     def disintegrate(self):
@@ -205,9 +207,10 @@ class Castle(Actor):
         self.dirty()
 
     def take_hit(self):
-        if self.team == 6:
-            out("Somebody's hitting a ghost castle, which is weird")
-            return
+        # Don't need to do anything else, actually.
+        # When it comes time to produce the unit,
+        # nothing will happen because we're on the ghost team.
+        # Becoming any other team will reset the spawn "cooldown".
         self.change_team(6)
 
     def convert(self, team, unit_type):
@@ -540,6 +543,15 @@ class Exploder(Unit):
         self.dirty()
         tasks.Die(self, self.lap_time, tasks.SLOW_PATIENCE)
     def die(self):
+        if self.dead:
+            # This is possible if we entered a castle while dying,
+            # which immediately disintegrates us.
+            # Usually this isn't a problem, but explode() assumes
+            # a not-None position. Of course, I could check that
+            # directly, but I'd rather it fail loudly if the
+            # assumption that living Entities have a position is
+            # violated.
+            return
         corpse = ExploderCorpse(self.pos, self.team)
         tasks.schedule(tasks.Move(corpse, None), 90)
         pos = self.pos
@@ -1231,7 +1243,7 @@ def make_thing(pos, name, team):
 def obliterate_tile(pos):
     global screen_dirty
     for ent in get_tile(pos).contents.copy():
-        if isinstance(ent, Unit):
+        if isinstance(ent, Actor):
             ent.disintegrate()
         else:
             ent.move(None)
